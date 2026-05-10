@@ -2,10 +2,15 @@ from PIL import Image, ImageEnhance
 import numpy as np
 import shutil
 import os
-import PyQt5
-dirname = os.path.dirname(PyQt5.__file__)
-qt_dir = os.path.join(dirname, 'Qt5', 'plugins', 'platforms')
-os.environ['QT_QPA_PLATFORM_PLUGIN_PATH'] = qt_dir
+try:
+    import PyQt5
+except ImportError:
+    PyQt5 = None
+
+if PyQt5 is not None:
+    dirname = os.path.dirname(PyQt5.__file__)
+    qt_dir = os.path.join(dirname, 'Qt5', 'plugins', 'platforms')
+    os.environ['QT_QPA_PLATFORM_PLUGIN_PATH'] = qt_dir
 # @title Define Visualization Utility Function { display-mode: "form" }
 # @markdown (double click to show code)
 # @markdown - display_sample

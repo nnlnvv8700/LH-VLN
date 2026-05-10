@@ -6,3 +6,5 @@ save_checkpoints/
 *.pth
 *.pt
 *.safetensors
+__pycache__/
+*.pyc
