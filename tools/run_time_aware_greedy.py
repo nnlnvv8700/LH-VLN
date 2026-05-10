@@ -58,6 +58,7 @@ def run_episode(args, record):
         scene_dataset=args.scene_dataset,
         success_dis=args.success_dis,
         max_step=time_budget,
+        no_render=args.no_render,
     )
     sim = TimeAwareSceneSimulator(
         sim_args,
@@ -106,6 +107,8 @@ def main():
         default="data/hm3d/hm3d_annotated_basis.scene_dataset_config.json",
     )
     parser.add_argument("--success-dis", type=float, default=1.0)
+    parser.add_argument("--no-render", action="store_true", default=True)
+    parser.add_argument("--render", dest="no_render", action="store_false")
     parser.add_argument("--output", default=None)
     args = parser.parse_args()
 

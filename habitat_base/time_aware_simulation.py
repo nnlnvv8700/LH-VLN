@@ -146,7 +146,10 @@ class TimeAwareSceneSimulator(SceneSimulator):
         nearest = self.select_nearest_target()
         if nearest is not None:
             display_target = nearest["target"]
-        obs = display_env(self.observations, action, self.save_path, self.step, display_target)
+        if self.no_render:
+            obs = self.observations
+        else:
+            obs = display_env(self.observations, action, self.save_path, self.step, display_target)
 
         if self.step == -1:
             self.step = 0
