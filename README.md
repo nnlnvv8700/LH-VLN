@@ -108,6 +108,60 @@ LH-VLN
 
 Our dataset is now available in [Hugging Face](https://huggingface.co/datasets/Starry123/LHPR-VLN) and [ModelScope](https://modelscope.cn/datasets/starry123/LHPR-VLN). Thanks a lot for your patience!
 
+## Time-Aware VLN Progress
+
+This branch is adapting LH-VLN into a time-aware VLN benchmark. The current goal is to evaluate unordered multi-target tasks under a fixed step budget: given one long-horizon prompt and several targets, the agent should decide what to complete first and how to maximize useful progress before time runs out.
+
+Current status:
+
+- Derived a time-aware JSONL dataset from `data/episode_task/*.json.gz`.
+- Each record keeps the original instruction, unordered targets, split, robot, scene, ordered oracle steps, and step budgets.
+- Added episode start state support with `start_position` and `start_yaw`.
+- Target positions are taken from successful trajectory endpoints when available, with semantic object positions used as fallback.
+- Added a no-render simulator path for server environments where Habitat RGB/depth rendering cannot create an EGL/OpenGL context.
+- Added a nearest-target greedy baseline that can run multiple budget ratios and export both per-ratio JSON files and a CSV summary.
+- The current baseline is an oracle-style navigation/search-efficiency baseline, not yet a learned VLN policy.
+
+Regenerate the derived time-aware data:
+
+```bash
+/file_system/vepfs/algorithm/intern03/.conda/envs/lhvln/bin/python \
+  tools/inspect_time_aware_data.py \
+  --output data/time_aware/episodes.jsonl
+```
+
+Run the current greedy budget sweep on the validation split:
+
+```bash
+HABITAT_SIM_LOG=quiet MAGNUM_LOG=quiet EGL_PLATFORM=surfaceless \
+  /file_system/vepfs/algorithm/intern03/.conda/envs/lhvln/bin/python \
+  tools/run_time_aware_greedy.py \
+  --split val \
+  --limit 0 \
+  --budget-ratios 0.5,0.75,1.0,1.25 \
+  --output-dir output/time_aware/greedy_val \
+  --summary-csv output/time_aware/greedy_val/summary.csv \
+  --quiet
+```
+
+Current validation result on `batch_6`:
+
+| Budget ratio | Episodes | Success@Budget | Completion rate | Reward rate | Avg. time used |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| 0.50 | 41 | 0.4634 | 0.5772 | 0.5772 | 62.17 |
+| 0.75 | 41 | 0.8049 | 0.8537 | 0.8537 | 72.63 |
+| 1.00 | 41 | 0.9268 | 0.9634 | 0.9634 | 75.98 |
+| 1.25 | 41 | 0.9512 | 0.9715 | 0.9715 | 77.02 |
+
+Local environment notes are recorded in `docs/lhvln_environment.md`.
+
+Next steps:
+
+- Add stronger baselines beyond nearest-target greedy, such as value-per-step or budget-aware planning.
+- Define final time-aware metrics and logging format for paper experiments.
+- Run test split sweeps after validating target-position coverage and unreachable-target handling.
+- Connect this benchmark path to model inference once the task format is stable.
+
 ## NavGen Pipeline
 
 After completing the preparations, you can now refer to the [guide](https://github.com/HCPLab-SYSU/LH-VLN/tree/master/nav_gen#readme) to generate your LH-VLN task!
