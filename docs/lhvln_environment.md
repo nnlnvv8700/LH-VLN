@@ -37,10 +37,9 @@ time-aware greedy/oracle baseline.
 
 ## Smoke Test
 
-The server currently cannot create a rendering GL context for RGB/depth sensors,
-so the time-aware greedy baseline defaults to no-render mode. This still loads
-HM3D, navmesh, and semantic objects, and is enough for step-budget search
-efficiency baselines.
+The time-aware greedy baseline defaults to no-render mode. This loads HM3D,
+navmesh, and semantic objects without creating RGB/depth sensors, which is
+enough for step-budget search efficiency baselines.
 
 ```bash
 cd /file_system/vepfs/algorithm/intern03/mhw/LH-VLN
@@ -53,8 +52,44 @@ HABITAT_SIM_LOG=quiet MAGNUM_LOG=quiet EGL_PLATFORM=surfaceless \
   --output output/time_aware/greedy_val_smoke.json
 ```
 
-To try the original rendered simulator path, pass `--render`; this still depends
-on a working EGL/OpenGL setup on the machine.
+## Rendered Habitat-Sim
+
+The RGB/depth rendered path initially failed with:
+
+```text
+GL::Context: cannot retrieve OpenGL version: GL::Renderer::Error::InvalidValue
+```
+
+The root cause was GLVND library mixing: Habitat loaded the system `libEGL.so.1`
+but the conda environment's `libGLdispatch.so.0`. Preloading the system
+`libGLdispatch.so.0` fixes the render context on this server.
+
+Use these environment variables when running with `--render`:
+
+```bash
+EGL_PLATFORM=surfaceless \
+__EGL_VENDOR_LIBRARY_FILENAMES=/usr/share/glvnd/egl_vendor.d/10_nvidia.json \
+LD_PRELOAD=/usr/lib/x86_64-linux-gnu/libGLdispatch.so.0 \
+HABITAT_GPU_DEVICE_ID=0
+```
+
+Rendered smoke test:
+
+```bash
+cd /file_system/vepfs/algorithm/intern03/mhw/LH-VLN
+EGL_PLATFORM=surfaceless \
+__EGL_VENDOR_LIBRARY_FILENAMES=/usr/share/glvnd/egl_vendor.d/10_nvidia.json \
+LD_PRELOAD=/usr/lib/x86_64-linux-gnu/libGLdispatch.so.0 \
+HABITAT_SIM_LOG=quiet MAGNUM_LOG=quiet HABITAT_GPU_DEVICE_ID=0 \
+  /file_system/vepfs/algorithm/intern03/.conda/envs/lhvln/bin/python \
+  tools/run_time_aware_greedy.py \
+  --split val \
+  --limit 1 \
+  --budget-ratio 0.5 \
+  --render \
+  --output output/time_aware/render_smoke.json \
+  --quiet
+```
 
 ## Time-Aware Data
 

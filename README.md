@@ -2,7 +2,7 @@
 
 本分支基于 LH-VLN 改造一个 time-aware VLN benchmark。核心问题是：在一条长指令里包含多个无序目标时，agent 面对限定步数或剩余时间，应该优先完成哪些目标、怎样在最短时间里做最有意义的事情。
 
-当前阶段先把任务格式、无渲染仿真链路和 oracle-style greedy baseline 跑通，用来作为后续模型方法的基准。
+当前阶段先把任务格式、仿真链路和 oracle-style greedy baseline 跑通，用来作为后续模型方法的基准。
 
 ## 当前目标
 
@@ -19,7 +19,7 @@
 - 每条样本保留原始 instruction、scene、robot、split、targets、ordered oracle steps 和多档 step budgets。
 - 加入 episode 起点信息：`start_position` 和 `start_yaw`。
 - target position 优先使用成功轨迹终点；缺失时 fallback 到 Habitat semantic object position。
-- 加入 no-render simulator 路径，用于当前服务器 Habitat RGB/depth 渲染无法创建 EGL/OpenGL context 的情况。
+- 加入 no-render simulator 路径，用于先稳定运行 oracle baseline；当前服务器的 RGB/depth 渲染也已通过 preload 系统 `libGLdispatch.so.0` 跑通，具体见 `docs/lhvln_environment.md`。
 - 实现 nearest-target greedy baseline。
 - 支持一次跑多个 budget ratios，并导出每个 ratio 的 JSON 结果和总表 CSV。
 - 处理 `GreedyFollowerError`，不可达目标会记录为 `abandoned_targets`，不会中断整批实验。
@@ -175,7 +175,7 @@ docs/lhvln_environment.md
 - 明确最终论文实验要使用的 time-aware 指标和日志格式。
 - 跑完整 test split sweep，并检查 target-position coverage 与 unreachable target 处理。
 - 把当前 benchmark 格式接到模型 inference，而不只是 oracle-style greedy。
-- 后续如果服务器 EGL/OpenGL 问题解决，再恢复 RGB/depth 视觉输入路径。
+- 接通 RGB/depth 视觉输入路径，并评估真正的 VLN 模型。
 
 ## 来源
 

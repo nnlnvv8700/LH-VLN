@@ -95,7 +95,8 @@ Budget:
 - 加入 `start_position` 和 `start_yaw`。
 - target position 优先使用成功轨迹终点，也就是 expert trajectory 到达该目标附近的位置。
 - 如果没有轨迹终点，则 fallback 到 Habitat semantic object position。
-- 新增 no-render simulator 路径，避免服务器 EGL/OpenGL 渲染问题阻塞实验。
+- 新增 no-render simulator 路径，避免渲染环境问题阻塞 oracle baseline。
+- 当前服务器的 Habitat RGB/depth 渲染问题已定位为 GLVND 库混用；运行 `--render` 时需要 preload 系统 `libGLdispatch.so.0`，具体命令见 `docs/lhvln_environment.md`。
 - 实现 nearest-target greedy baseline。
 - 支持多 budget ratio sweep。
 - 输出每档预算的 JSON 结果和 summary CSV。
@@ -209,18 +210,64 @@ Oracle optimal ordering baseline
 
 师兄提到的真正创新点可能在这里：
 
-找一个通用 VLN 模型，让它接受比较自由的 prompt，并把时间限制写进 prompt。
+找一个通用 VLN 模型，让它接受比较自由的 prompt，并把时间限制或时间紧迫程度写进 prompt。
+
+目前可以中和成两个 prompt setting：
+
+### 8.1 显式 step budget prompt
+
+每一步给模型的 prompt 都包含本 episode 的总时间限制，即 total step budget。这样模型在整个交互过程中都能持续看到任务的总体时间约束。也可以做 ablation，比较是否加入当前已用步数或 remaining steps。
 
 示例 prompt：
 
 ```text
-You have 80 steps left.
+The total time budget for this episode is 80 steps.
 Complete as many targets as possible before the budget runs out.
 Instruction: Take the box in the bedroom to the dining area table and then retrieve the lamp from there.
 Completed targets: none.
 Remaining targets: box, table, lamp.
 What is the next action?
 ```
+
+### 8.2 模糊时间压力 prompt
+
+另一种设置是不直接给精确 step 数，而是所有 prompt 都使用自然语言的轻重缓急描述，例如：
+
+```text
+Time condition: The time is sufficient.
+Time condition: The time is tight.
+Time condition: The time is relatively insufficient.
+```
+
+或者更自然地写成：
+
+```text
+You are in a hurry. Complete as much as possible.
+The time is relatively tight. Prioritize useful progress.
+You have enough time. Try to complete the whole instruction.
+```
+
+这个设置不强行把 `in a hurry` 人为映射成某个固定 ratio，而是测试模型是否会因为自然语言里的时间压力不同而改变策略。它更适合检验模型的 prompt adaptation 和 time-awareness。
+
+### 8.3 对比原则
+
+两个方向都合理：
+
+- 显式 step budget 更可控、适合标准 benchmark 和 budget curve。
+- 模糊时间压力更贴近自然语言 prompt，适合体现模型灵活性和创新点。
+
+实际实验可以两种都跑，观察哪种更有区分度。如果显式 step budget 的曲线更稳定，就作为主结果；如果模糊时间压力能明显改变模型策略，可以作为 time-aware prompt adaptation 的重点实验。
+
+为了保证可复现，模型推理时需要固定解码参数：
+
+```text
+temperature = 0
+top_p = 1.0 或固定值
+top_k = 固定值或关闭
+seed = 固定
+```
+
+并在实验记录中保存完整 prompt、模型版本和解码配置。
 
 模型输出动作：
 
@@ -239,7 +286,7 @@ stop
 
 这个实验可以检验：
 
-- 模型是否能理解剩余时间。
+- 模型是否能理解显式 step budget 或模糊时间压力。
 - 模型是否能主动调整目标顺序。
 - 模型是否能在预算不足时优先完成一部分目标。
 - 模型是否具有灵活的 prompt adaptation 能力。
@@ -266,7 +313,7 @@ stop
 3. 跑完整 test split 的 budget curve。
 4. 确认最终指标，重点是 `budget -> success/completion` 曲线。
 5. 找一个可用的通用 VLN 模型或 LH-VLN 模型变体。
-6. 把 remaining budget 写入 prompt，让模型直接输出动作或下一个目标。
+6. 对比显式 step budget prompt 和模糊时间压力 prompt，让模型直接输出动作或下一个目标。
 7. 比较：
    - nearest-target greedy
    - oracle optimal ordering
@@ -285,38 +332,44 @@ stop
    - RGB/depth 视觉输入？
    - semantic/map 信息？
    - 当前目标列表和位置信息？
-   - 如果使用视觉输入，需要先解决当前服务器 EGL/OpenGL 渲染问题。
+   - 如果使用视觉输入，需要在运行命令中加入 `LD_PRELOAD=/usr/lib/x86_64-linux-gnu/libGLdispatch.so.0` 等渲染环境变量。
 
-3. 时间限制怎么写进模型？
-   - 只在 episode 开始给一次？
-   - 每一步都更新 remaining steps？
+3. 最终采用哪种 time prompt 作为主实验？
+   - 显式 total step budget？
+   - 每一步更新 remaining steps？
+   - 模糊时间压力描述，例如时间宽裕、时间紧张、时间相对不足？
+   - 两种都跑，按区分度决定主结果和补充结果？
+
+4. 除了 total step budget，prompt 里是否还要加入动态时间状态？
+   - 是否给当前已用步数？
+   - 是否给 remaining steps？
    - 是否给 completed targets / remaining targets？
 
-4. `stop` 的语义如何最终定义？
+5. `stop` 的语义如何最终定义？
    - 当前设定是 stop 表示尝试完成附近目标，不代表整个 episode 结束。
    - 是否需要额外动作表示 episode stop？
 
-5. 理论上限 baseline 的 cost 用什么？
+6. 理论上限 baseline 的 cost 用什么？
    - geodesic distance？
    - Habitat follower 实际 step 数？
    - 更推荐实际 step 数，因为 budget 本身就是 step。
 
-6. target position 是否可以作为 oracle 信息使用？
+7. target position 是否可以作为 oracle 信息使用？
    - Greedy 和 optimal ordering 都依赖目标位置。
    - 需要在论文或报告中明确它们是 oracle baseline。
 
-7. 所有目标 value 是否都设为 1？
+8. 所有目标 value 是否都设为 1？
    - 当前师兄建议先设成一样的重要性。
    - 后续是否需要区分 pickup / place / key object 等不同价值？
 
-8. 最终数据划分和报告范围是什么？
+9. 最终数据划分和报告范围是什么？
    - 是否只报告 test split？
    - validation 是否只用于开发？
    - 是否需要重新划分或过滤 target position 缺失严重的样本？
 
-9. 是否保留原 LH-VLN 有序任务作为对照？
+10. 是否保留原 LH-VLN 有序任务作为对照？
    - 可以比较 ordered setting 和 unordered time-aware setting 的差异。
 
-10. 如果模型无法判断是否成功，系统判定是否足够合理？
+11. 如果模型无法判断是否成功，系统判定是否足够合理？
     - 当前设计是系统根据距离判定目标完成。
     - 需要确认这是否符合最终 benchmark 设定。
