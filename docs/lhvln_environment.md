@@ -55,3 +55,33 @@ HABITAT_SIM_LOG=quiet MAGNUM_LOG=quiet EGL_PLATFORM=surfaceless \
 
 To try the original rendered simulator path, pass `--render`; this still depends
 on a working EGL/OpenGL setup on the machine.
+
+## Time-Aware Data
+
+Regenerate the derived JSONL after changing the data conversion logic:
+
+```bash
+/file_system/vepfs/algorithm/intern03/.conda/envs/lhvln/bin/python \
+  tools/inspect_time_aware_data.py \
+  --output data/time_aware/episodes.jsonl
+```
+
+The JSONL keeps the LH-VLN episode start state and, when available, target
+positions derived from the successful trajectory endpoints. These trajectory
+endpoints are more reliable for the current benchmark than semantic object AABBs.
+
+## Budget Sweep
+
+Run a quiet validation sweep over all default budget ratios:
+
+```bash
+HABITAT_SIM_LOG=quiet MAGNUM_LOG=quiet EGL_PLATFORM=surfaceless \
+  /file_system/vepfs/algorithm/intern03/.conda/envs/lhvln/bin/python \
+  tools/run_time_aware_greedy.py \
+  --split val \
+  --limit 0 \
+  --budget-ratios 0.5,0.75,1.0,1.25 \
+  --output-dir output/time_aware/greedy_val \
+  --summary-csv output/time_aware/greedy_val/summary.csv \
+  --quiet
+```

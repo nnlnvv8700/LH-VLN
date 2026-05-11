@@ -2,6 +2,7 @@ import math
 
 import habitat_sim
 import numpy as np
+import quaternion
 
 from .simulation import SceneSimulator
 from .visualization import display_env
@@ -17,11 +18,13 @@ class TimeAwareSceneSimulator(SceneSimulator):
 
     def __init__(self, args, config, time_budget=None, target_values=None):
         super().__init__(args, config)
+        self._set_episode_start_state()
         self.time_budget = int(time_budget if time_budget is not None else args.max_step)
         self.time_used = 0
         self.remaining_targets = set(range(self.target_num))
         self.completed_targets = []
         self.completion_order = []
+        self.abandoned_targets = []
         self.target_values = target_values or [1.0 for _ in range(self.target_num)]
         self.failed_stops = 0
         self.nav_steps = []
@@ -31,11 +34,32 @@ class TimeAwareSceneSimulator(SceneSimulator):
         self.gt_path = []
         self.info = self.get_time_aware_info()
 
+    def _set_episode_start_state(self):
+        start_pos = self.config.get("Start pos")
+        if start_pos is None:
+            return
+
+        agent_state = habitat_sim.AgentState()
+        agent_state.position = np.array(start_pos, dtype=np.float32)
+
+        start_yaw = self.config.get("Start yaw")
+        if start_yaw is not None:
+            yaw = math.radians(float(start_yaw))
+            agent_state.rotation = quaternion.from_rotation_vector([0.0, yaw, 0.0])
+
+        self.agent.set_state(agent_state)
+        if not self.no_render:
+            self.observations = self.sim.get_sensor_observations()
+
     @property
     def time_remaining(self):
         return max(self.time_budget - self.time_used, 0)
 
     def get_coord_by_index(self, target_index):
+        target_positions = self.config.get("Target positions")
+        if target_positions and target_positions[target_index] is not None:
+            return [np.array(target_positions[target_index], dtype=np.float32)]
+
         obj_target = self.target[target_index]
         region_id = self.region[target_index]
         coord_list = []
@@ -136,6 +160,20 @@ class TimeAwareSceneSimulator(SceneSimulator):
         print(f"\n***** time-aware nav stop failed near {nearest['target']} *****\n")
         return False, nearest
 
+    def _abandon_target(self, target_index, reason):
+        if target_index not in self.remaining_targets:
+            return
+        self.remaining_targets.remove(target_index)
+        self.abandoned_targets.append(
+            {
+                "target_index": target_index,
+                "target": self.target[target_index],
+                "time_used": self.time_used,
+                "reason": reason,
+            }
+        )
+        print(f"\n***** time-aware abandon {self.target[target_index]}: {reason} *****\n")
+
     def actor(self, action):
         if action == "stop":
             pass
@@ -180,7 +218,14 @@ class TimeAwareSceneSimulator(SceneSimulator):
         nearest = self.select_nearest_target()
         if nearest is None or nearest["target coord"] is None:
             return "stop"
-        return self.get_next_action(nearest["target coord"]) or "stop"
+        if math.isinf(nearest["geo dis"]):
+            self._abandon_target(nearest["target_index"], "unreachable_geodesic")
+            return "stop"
+        try:
+            return self.get_next_action(nearest["target coord"]) or "stop"
+        except habitat_sim.errors.GreedyFollowerError:
+            self._abandon_target(nearest["target_index"], "greedy_follower_error")
+            return "stop"
 
     def return_results(self):
         reward = sum(
@@ -202,6 +247,7 @@ class TimeAwareSceneSimulator(SceneSimulator):
             "time_remaining": self.time_remaining,
             "completed_targets": self.completed_targets,
             "completion_order": self.completion_order,
+            "abandoned_targets": self.abandoned_targets,
             "completion_rate": completion_rate,
             "reward": reward,
             "total_reward": total_reward,

@@ -2,6 +2,9 @@
 """Run a nearest-target greedy baseline for time-aware LH-VLN tasks."""
 
 import argparse
+import contextlib
+import csv
+import io
 import json
 import sys
 from pathlib import Path
@@ -41,6 +44,9 @@ def record_to_config(record):
         "Robot": record["robot"],
         "Object": [target["name"] for target in targets],
         "Region": [region_number(target["region_id"]) for target in targets],
+        "Target positions": [target.get("target_position") for target in targets],
+        "Start pos": record.get("start_position"),
+        "Start yaw": record.get("start_yaw"),
         "Batch": "/" + record["batch"],
     }
 
@@ -92,7 +98,43 @@ def summarize(results):
         "reward_rate": sum(item["reward_rate"] for item in results) / len(results),
         "avg_time_used": sum(item["time_used"] for item in results) / len(results),
         "avg_failed_stops": sum(item["failed_stops"] for item in results) / len(results),
+        "avg_abandoned_targets": sum(len(item.get("abandoned_targets", [])) for item in results) / len(results),
     }
+
+
+def parse_budget_ratios(value):
+    return [float(item) for item in value.split(",") if item.strip()]
+
+
+def ratio_name(ratio):
+    return str(ratio).replace(".", "p")
+
+
+def output_path_for_ratio(output, output_dir, split, ratio):
+    if output:
+        return Path(output)
+    if not output_dir:
+        return None
+    return Path(output_dir) / f"greedy_{split}_budget_{ratio_name(ratio)}.json"
+
+
+def write_json(path, summary, results):
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("w", encoding="utf-8") as handle:
+        json.dump({"summary": summary, "results": results}, handle, ensure_ascii=False, indent=2)
+    print(f"wrote: {path}")
+
+
+def write_summary_csv(path, rows):
+    if not rows:
+        return
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fieldnames = list(rows[0].keys())
+    with path.open("w", encoding="utf-8", newline="") as handle:
+        writer = csv.DictWriter(handle, fieldnames=fieldnames)
+        writer.writeheader()
+        writer.writerows(rows)
+    print(f"wrote: {path}")
 
 
 def main():
@@ -100,7 +142,12 @@ def main():
     parser.add_argument("--episodes", default="data/time_aware/episodes.jsonl")
     parser.add_argument("--split", default="val", choices=["train", "val", "test"])
     parser.add_argument("--limit", type=int, default=5)
-    parser.add_argument("--budget-ratio", type=float, default=1.0)
+    parser.add_argument("--budget-ratio", type=float, default=None)
+    parser.add_argument(
+        "--budget-ratios",
+        default="0.5,0.75,1.0,1.25",
+        help="Comma-separated budget ratios. Ignored when --budget-ratio is set.",
+    )
     parser.add_argument("--scene", default="data/hm3d/")
     parser.add_argument(
         "--scene-dataset",
@@ -110,24 +157,43 @@ def main():
     parser.add_argument("--no-render", action="store_true", default=True)
     parser.add_argument("--render", dest="no_render", action="store_false")
     parser.add_argument("--output", default=None)
+    parser.add_argument("--output-dir", default="output/time_aware")
+    parser.add_argument("--summary-csv", default=None)
+    parser.add_argument("--quiet", action="store_true")
     args = parser.parse_args()
 
     records = load_records(args.episodes, args.split, args.limit)
-    results = []
-    for index, record in enumerate(records):
-        print(f"===== [{index + 1}/{len(records)}] {record['task_id']} =====")
-        results.append(run_episode(args, record))
+    budget_ratios = [args.budget_ratio] if args.budget_ratio is not None else parse_budget_ratios(args.budget_ratios)
+    if args.output and len(budget_ratios) != 1:
+        raise ValueError("--output can only be used with one budget ratio. Use --output-dir for sweeps.")
+    summary_rows = []
 
-    summary = summarize(results)
-    print("\nsummary:")
-    print(json.dumps(summary, ensure_ascii=False, indent=2))
+    for ratio in budget_ratios:
+        args.budget_ratio = ratio
+        results = []
+        print(f"\n===== budget_ratio={ratio} split={args.split} episodes={len(records)} =====")
+        for index, record in enumerate(records):
+            print(f"===== [{index + 1}/{len(records)}] {record['task_id']} =====")
+            if args.quiet:
+                with contextlib.redirect_stdout(io.StringIO()):
+                    results.append(run_episode(args, record))
+            else:
+                results.append(run_episode(args, record))
 
-    if args.output:
-        output = Path(args.output)
-        output.parent.mkdir(parents=True, exist_ok=True)
-        with output.open("w", encoding="utf-8") as handle:
-            json.dump({"summary": summary, "results": results}, handle, ensure_ascii=False, indent=2)
-        print(f"wrote: {output}")
+        summary = summarize(results)
+        summary["split"] = args.split
+        summary["budget_ratio"] = ratio
+        summary["limit"] = args.limit
+        print("\nsummary:")
+        print(json.dumps(summary, ensure_ascii=False, indent=2))
+
+        output = output_path_for_ratio(args.output, args.output_dir, args.split, ratio)
+        if output:
+            write_json(output, summary, results)
+        summary_rows.append(summary)
+
+    summary_csv = Path(args.summary_csv) if args.summary_csv else Path(args.output_dir) / f"greedy_{args.split}_summary.csv"
+    write_summary_csv(summary_csv, summary_rows)
 
 
 if __name__ == "__main__":

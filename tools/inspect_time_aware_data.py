@@ -52,8 +52,51 @@ def normalize_targets(raw_targets, default_value):
     return targets
 
 
+def get_episode_start_yaw(episode):
+    st_tasks = episode.get("st_task") or []
+    if not st_tasks:
+        return None
+    first_task = min(st_tasks, key=lambda item: item.get("start", 0))
+    return first_task.get("start_yaw")
+
+
+def load_trial_positions(task_dir, trajectory_path):
+    task_path = task_dir / trajectory_path / "task.json"
+    if not task_path.exists():
+        return None
+    with task_path.open("r", encoding="utf-8") as handle:
+        task_data = json.load(handle)
+    trial = task_data.get("trial", {}).get("trial_1")
+    if trial is None:
+        trial = next(iter(task_data.get("trial", {}).values()), None)
+    if not trial:
+        return None
+    return trial.get("pos")
+
+
+def target_position_lookup(episode, task_dir):
+    lookup = {}
+    for step_task in episode.get("st_task") or []:
+        trajectory_path = step_task.get("trajectory path")
+        positions = load_trial_positions(task_dir, trajectory_path) if trajectory_path else None
+        if not positions:
+            continue
+
+        end = step_task.get("end")
+        if end is None:
+            continue
+        index = max(0, min(int(end) - 1, len(positions) - 1))
+        end_position = positions[index]
+
+        for target, region in zip(step_task.get("target", []), step_task.get("Region", [])):
+            lookup[(target, str(region))] = end_position
+    return lookup
+
+
 def make_record(split, batch, episode_key, episode, budget_ratios, default_value):
     task = episode["lh_task"]
+    task_dir = Path("data")
+    positions_by_target = target_position_lookup(episode, task_dir)
     gt_steps = task.get("gt_step") or []
     oracle_total_steps = int(sum(gt_steps)) if gt_steps else None
     budgets = {}
@@ -61,13 +104,15 @@ def make_record(split, batch, episode_key, episode, budget_ratios, default_value
         for ratio in budget_ratios:
             budgets[str(ratio)] = max(1, int(round(oracle_total_steps * ratio)))
 
-    return {
+    record = {
         "task_id": f"{batch}/{episode_key}",
         "split": split,
         "batch": batch,
         "scene": task.get("Scene"),
         "robot": task.get("Robot"),
         "instruction": task.get("Task instruction"),
+        "start_position": task.get("Start pos"),
+        "start_yaw": get_episode_start_yaw(episode),
         "unordered_targets": True,
         "time_unit": "step",
         "targets": normalize_targets(task.get("Object"), default_value),
@@ -76,6 +121,12 @@ def make_record(split, batch, episode_key, episode, budget_ratios, default_value
         "time_budgets": budgets,
         "source_subtask_list": task.get("Subtask list"),
     }
+    for target in record["targets"]:
+        region_number = None
+        if target["region_id"] is not None:
+            region_number = target["region_id"].replace("Region", "").strip()
+        target["target_position"] = positions_by_target.get((target["name"], str(region_number)))
+    return record
 
 
 def describe(values):
@@ -126,6 +177,10 @@ def main():
                 )
 
     target_counts = [len(record["targets"]) for record in records]
+    target_position_counts = [
+        sum(target.get("target_position") is not None for target in record["targets"])
+        for record in records
+    ]
     total_steps = [
         record["oracle_total_steps_ordered"]
         for record in records
@@ -144,6 +199,7 @@ def main():
     print(f"splits: {by_split}")
     print(f"robots: {by_robot}")
     print(f"targets_per_task: {describe(target_counts)}")
+    print(f"target_positions_per_task: {describe(target_position_counts)}")
     print(f"ordered_oracle_total_steps: {describe(total_steps)}")
     for ratio in budget_ratios:
         key = str(ratio)
