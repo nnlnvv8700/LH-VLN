@@ -21,6 +21,7 @@
 - target position 优先使用成功轨迹终点；缺失时 fallback 到 Habitat semantic object position。
 - 加入 no-render simulator 路径，用于先稳定运行 oracle baseline；当前服务器的 RGB/depth 渲染也已通过 preload 系统 `libGLdispatch.so.0` 跑通，具体见 `docs/lhvln_environment.md`。
 - 实现 nearest-target greedy baseline。
+- 实现 oracle optimal ordering baseline：枚举目标访问顺序，用 Habitat follower 实走，选择预算内完成度最高的顺序。
 - 支持一次跑多个 budget ratios，并导出每个 ratio 的 JSON 结果和总表 CSV。
 - 处理 `GreedyFollowerError`，不可达目标会记录为 `abandoned_targets`，不会中断整批实验。
 
@@ -141,6 +142,24 @@ output/time_aware/greedy_val/greedy_val_budget_1p25.json
 output/time_aware/greedy_val/summary.csv
 ```
 
+## 运行 Oracle Ordering Baseline
+
+这个 baseline 会枚举每条任务的所有目标顺序，并用 Habitat follower 按每个顺序实际执行，最后选择预算内完成目标最多、用时更少的顺序。由于每条任务目标数通常只有 2 到 4 个，枚举可以作为一个小规模理论上限参考。
+
+跑一个 smoke test：
+
+```bash
+HABITAT_SIM_LOG=quiet MAGNUM_LOG=quiet EGL_PLATFORM=surfaceless \
+  /file_system/vepfs/algorithm/intern03/.conda/envs/lhvln/bin/python \
+  tools/run_time_aware_oracle_ordering.py \
+  --split val \
+  --limit 2 \
+  --budget-ratios 0.5,1.0 \
+  --output-dir output/time_aware/oracle_smoke \
+  --summary-csv output/time_aware/oracle_smoke/summary.csv \
+  --quiet
+```
+
 ## 当前 Validation 结果
 
 当前结果来自 `val / batch_6`，共 41 条任务。
@@ -165,13 +184,15 @@ output/time_aware/greedy_val/summary.csv
 configs/time_aware_vln.yaml
 tools/inspect_time_aware_data.py
 tools/run_time_aware_greedy.py
+tools/run_time_aware_oracle_ordering.py
 habitat_base/time_aware_simulation.py
 docs/lhvln_environment.md
 ```
 
 ## 下一步
 
-- 加一个比 nearest-target greedy 更强的 budget-aware baseline，例如 value-per-step 或剩余时间规划。
+- 跑完整 validation/test split 的 oracle ordering 结果，并和 greedy 画在同一条 budget curve 上。
+- 继续尝试 value-per-step 或剩余时间规划等非 oracle / 弱 oracle baseline。
 - 明确最终论文实验要使用的 time-aware 指标和日志格式。
 - 跑完整 test split sweep，并检查 target-position coverage 与 unreachable target 处理。
 - 把当前 benchmark 格式接到模型 inference，而不只是 oracle-style greedy。

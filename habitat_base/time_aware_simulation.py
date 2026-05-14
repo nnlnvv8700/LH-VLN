@@ -133,13 +133,13 @@ class TimeAwareSceneSimulator(SceneSimulator):
             if info["geo dis"] < self.args.success_dis:
                 self.oracle_successes[info["target_index"]] = True
 
-    def _complete_nearest_if_possible(self):
-        nearest = self.select_nearest_target()
-        if nearest is None:
+    def _complete_target_if_possible(self, target_index):
+        if target_index not in self.remaining_targets:
             return False, None
-        target_index = nearest["target_index"]
-        self.nav_errors.append(nearest["geo dis"])
-        if nearest["geo dis"] < self.args.success_dis:
+
+        target_info = self.get_target_info(target_index)
+        self.nav_errors.append(target_info["geo dis"])
+        if target_info["geo dis"] < self.args.success_dis:
             self.successes[target_index] = True
             self.remaining_targets.remove(target_index)
             self.completed_targets.append(target_index)
@@ -148,17 +148,23 @@ class TimeAwareSceneSimulator(SceneSimulator):
                     "target_index": target_index,
                     "target": self.target[target_index],
                     "time_used": self.time_used,
-                    "navigation_error": nearest["geo dis"],
+                    "navigation_error": target_info["geo dis"],
                 }
             )
             former = sum(self.nav_steps)
             self.nav_steps.append(self.time_used - former)
-            print(f"\n***** time-aware nav to {nearest['target']} success! *****\n")
-            return True, nearest
+            print(f"\n***** time-aware nav to {target_info['target']} success! *****\n")
+            return True, target_info
 
         self.failed_stops += 1
-        print(f"\n***** time-aware nav stop failed near {nearest['target']} *****\n")
-        return False, nearest
+        print(f"\n***** time-aware nav stop failed near {target_info['target']} *****\n")
+        return False, target_info
+
+    def _complete_nearest_if_possible(self):
+        nearest = self.select_nearest_target()
+        if nearest is None:
+            return False, None
+        return self._complete_target_if_possible(nearest["target_index"])
 
     def _abandon_target(self, target_index, reason):
         if target_index not in self.remaining_targets:
@@ -174,7 +180,7 @@ class TimeAwareSceneSimulator(SceneSimulator):
         )
         print(f"\n***** time-aware abandon {self.target[target_index]}: {reason} *****\n")
 
-    def actor(self, action):
+    def actor(self, action, stop_target_index=None):
         if action == "stop":
             pass
         else:
@@ -200,7 +206,10 @@ class TimeAwareSceneSimulator(SceneSimulator):
         self._mark_oracle_successes()
 
         if action == "stop":
-            self._complete_nearest_if_possible()
+            if stop_target_index is None:
+                self._complete_nearest_if_possible()
+            else:
+                self._complete_target_if_possible(stop_target_index)
 
         if not self.remaining_targets:
             self.done = True
@@ -225,6 +234,19 @@ class TimeAwareSceneSimulator(SceneSimulator):
             return self.get_next_action(nearest["target coord"]) or "stop"
         except habitat_sim.errors.GreedyFollowerError:
             self._abandon_target(nearest["target_index"], "greedy_follower_error")
+            return "stop"
+
+    def get_next_action_to_target(self, target_index):
+        target_info = self.get_target_info(target_index)
+        if target_info["target coord"] is None:
+            return "stop"
+        if math.isinf(target_info["geo dis"]):
+            self._abandon_target(target_index, "unreachable_geodesic")
+            return "stop"
+        try:
+            return self.get_next_action(target_info["target coord"]) or "stop"
+        except habitat_sim.errors.GreedyFollowerError:
+            self._abandon_target(target_index, "greedy_follower_error")
             return "stop"
 
     def return_results(self):

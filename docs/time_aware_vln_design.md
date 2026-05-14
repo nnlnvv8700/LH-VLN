@@ -188,7 +188,7 @@ S -> C -> A -> B
 S -> C -> B -> A
 ```
 
-对每个顺序估计实际 step cost，然后在每个 budget 下选完成目标数最多的顺序。
+对每个顺序用 Habitat follower 实际执行，然后在每个 budget 下选完成目标数最多、reward 最高、用时更少的顺序。
 
 这个可以作为：
 
@@ -205,6 +205,26 @@ Oracle optimal ordering baseline
 - Dijkstra/A* over state space：如果以后目标数变多，可以考虑。
 
 当前更推荐先做 permutation oracle，因为简单、透明、足够覆盖当前数据。
+
+当前已实现 `tools/run_time_aware_oracle_ordering.py`：
+
+```bash
+HABITAT_SIM_LOG=quiet MAGNUM_LOG=quiet EGL_PLATFORM=surfaceless \
+  /file_system/vepfs/algorithm/intern03/.conda/envs/lhvln/bin/python \
+  tools/run_time_aware_oracle_ordering.py \
+  --split val \
+  --limit 2 \
+  --budget-ratios 0.5,1.0 \
+  --output-dir output/time_aware/oracle_smoke \
+  --summary-csv output/time_aware/oracle_smoke/summary.csv \
+  --quiet
+```
+
+它和 greedy 的区别是：
+
+- greedy 每一步只选当前最近目标。
+- oracle ordering 会枚举完整目标顺序，再选择预算内最优顺序。
+- 两者都仍然知道目标位置，所以都属于 oracle-style baseline。
 
 ## 8. 通用 VLN 模型方向
 
@@ -309,7 +329,7 @@ stop
 ## 10. 建议的下一步实验顺序
 
 1. 保留 nearest-target greedy baseline。
-2. 实现 oracle optimal ordering baseline，作为理论上限。
+2. 使用已实现的 oracle optimal ordering baseline，作为理论上限参考。
 3. 跑完整 test split 的 budget curve。
 4. 确认最终指标，重点是 `budget -> success/completion` 曲线。
 5. 找一个可用的通用 VLN 模型或 LH-VLN 模型变体。
