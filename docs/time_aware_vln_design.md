@@ -313,6 +313,53 @@ stop
 
 这部分比 oracle greedy 更接近真实 time-aware VLN，也更可能成为创新点。
 
+### 8.4 当前先实现的 NavGPT-style Planner 版本
+
+为了先把模型接入链路做稳，当前先采用一个中间版本：
+
+```text
+LLM / Planner 只负责高层目标选择：
+给定 instruction、剩余目标、已完成目标、时间信息，
+输出下一步应该去哪个 target index。
+
+Habitat follower 负责低层导航动作：
+根据 planner 选择的目标，自动生成 move_forward / turn_left / turn_right / stop。
+```
+
+这样做的好处是：
+
+- 先验证模型是否真的会因为时间限制改变目标选择。
+- 避免一开始就被动作级视觉导航、碰撞、渲染、历史图像输入等问题卡住。
+- 可以直接和 nearest-target greedy、oracle ordering 对齐比较，因为三者都在“目标顺序选择”这个层面竞争。
+
+当前入口是：
+
+```bash
+tools/run_time_aware_llm_planner.py
+```
+
+它支持三类 planner：
+
+- `nearest`：复用 planner 框架，但规则选择最近目标，用于 smoke test。
+- `first` / `random`：简单 sanity check。
+- `llm`：把 prompt 通过 stdin 交给外部命令，外部命令在 stdout 输出目标 index。
+
+当前 prompt 模式：
+
+- `explicit`：每一步给 total step budget、used steps、remaining steps。
+- `fuzzy`：给模糊时间压力，例如 `sufficient`、`tight`、`insufficient`。
+- `none`：不提供时间信息，用作 ablation。
+
+后续真实 LLM 实验可以先不做动作级输出，而是先看：
+
+```text
+同一个任务、同一个 budget 下，
+LLM 选出来的目标顺序是否比 nearest greedy 更合理，
+是否接近 oracle ordering。
+```
+
+如果高层目标选择已经有区分度，再继续扩展到动作级 VLN 输出。
+
 ## 9. 当前结果
 
 当前已经在 `val / batch_6` 跑通 41 条任务。
@@ -332,12 +379,14 @@ stop
 2. 使用已实现的 oracle optimal ordering baseline，作为理论上限参考。
 3. 跑完整 test split 的 budget curve。
 4. 确认最终指标，重点是 `budget -> success/completion` 曲线。
-5. 找一个可用的通用 VLN 模型或 LH-VLN 模型变体。
-6. 对比显式 step budget prompt 和模糊时间压力 prompt，让模型直接输出动作或下一个目标。
-7. 比较：
+5. 用 `tools/run_time_aware_llm_planner.py` 接入一个真实 LLM，让它先输出下一个目标 index。
+6. 对比显式 step budget prompt 和模糊时间压力 prompt。
+7. 如果目标选择结果有意义，再扩展到动作级 VLN 输出。
+8. 比较：
    - nearest-target greedy
    - oracle optimal ordering
-   - VLN model with time prompt
+   - LLM planner with time prompt
+   - 后续动作级 VLN model with time prompt
 
 ## 11. 目前还不确定的问题
 

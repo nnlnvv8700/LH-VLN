@@ -22,6 +22,7 @@
 - 加入 no-render simulator 路径，用于先稳定运行 oracle baseline；当前服务器的 RGB/depth 渲染也已通过 preload 系统 `libGLdispatch.so.0` 跑通，具体见 `docs/lhvln_environment.md`。
 - 实现 nearest-target greedy baseline。
 - 实现 oracle optimal ordering baseline：枚举目标访问顺序，用 Habitat follower 实走，选择预算内完成度最高的顺序。
+- 新增 NavGPT-style high-level planner 框架：模型只负责选择下一个目标，底层导航动作仍由 Habitat follower 生成。
 - 支持一次跑多个 budget ratios，并导出每个 ratio 的 JSON 结果和总表 CSV。
 - 处理 `GreedyFollowerError`，不可达目标会记录为 `abandoned_targets`，不会中断整批实验。
 
@@ -160,6 +161,56 @@ HABITAT_SIM_LOG=quiet MAGNUM_LOG=quiet EGL_PLATFORM=surfaceless \
   --quiet
 ```
 
+## 运行 NavGPT-Style Planner
+
+这个入口用于接后续通用 VLN / LLM planner。当前设计是两层：
+
+```text
+高层 planner：根据 instruction、剩余目标、时间限制选择下一个目标
+低层 follower：由 Habitat-Sim 生成 move_forward / turn_left / turn_right / stop
+```
+
+先跑一个不调用真实 LLM 的 smoke test，`--planner nearest` 会复用同一个 planner 接口，但选择最近目标：
+
+```bash
+HABITAT_SIM_LOG=quiet MAGNUM_LOG=quiet EGL_PLATFORM=surfaceless \
+  /file_system/vepfs/algorithm/intern03/.conda/envs/lhvln/bin/python \
+  tools/run_time_aware_llm_planner.py \
+  --split val \
+  --limit 2 \
+  --budget-ratios 0.5,1.0 \
+  --planner nearest \
+  --time-prompt explicit \
+  --output-dir output/time_aware/planner_smoke \
+  --summary-csv output/time_aware/planner_smoke/summary.csv \
+  --quiet \
+  --save-prompts
+```
+
+如果要接外部 LLM，用 `--planner llm --llm-command`。外部命令从 stdin 读取完整 prompt，并在 stdout 输出一个剩余目标的 index：
+
+```bash
+HABITAT_SIM_LOG=quiet MAGNUM_LOG=quiet EGL_PLATFORM=surfaceless \
+  /file_system/vepfs/algorithm/intern03/.conda/envs/lhvln/bin/python \
+  tools/run_time_aware_llm_planner.py \
+  --split val \
+  --limit 2 \
+  --budget-ratio 0.5 \
+  --planner llm \
+  --llm-command "python your_llm_selector.py" \
+  --time-prompt explicit \
+  --output-dir output/time_aware/planner_llm_val \
+  --summary-csv output/time_aware/planner_llm_val/summary.csv \
+  --quiet \
+  --save-prompts
+```
+
+时间 prompt 支持三种：
+
+- `explicit`：每一步给 total step budget、used steps、remaining steps。
+- `fuzzy`：给模糊时间压力，例如 `sufficient`、`tight`、`insufficient`。
+- `none`：不提供时间提示，用作 ablation。
+
 ## 当前 Validation 结果
 
 当前结果来自 `val / batch_6`，共 41 条任务。
@@ -185,6 +236,7 @@ configs/time_aware_vln.yaml
 tools/inspect_time_aware_data.py
 tools/run_time_aware_greedy.py
 tools/run_time_aware_oracle_ordering.py
+tools/run_time_aware_llm_planner.py
 habitat_base/time_aware_simulation.py
 docs/lhvln_environment.md
 ```
@@ -192,6 +244,7 @@ docs/lhvln_environment.md
 ## 下一步
 
 - 跑完整 validation/test split 的 oracle ordering 结果，并和 greedy 画在同一条 budget curve 上。
+- 接入真实 LLM 或通用 VLN 模型，先让它做高层目标选择。
 - 继续尝试 value-per-step 或剩余时间规划等非 oracle / 弱 oracle baseline。
 - 明确最终论文实验要使用的 time-aware 指标和日志格式。
 - 跑完整 test split sweep，并检查 target-position coverage 与 unreachable target 处理。
