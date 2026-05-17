@@ -68,6 +68,14 @@ def chat_completion(args, prompt):
     api_key = os.environ.get(args.api_key_env)
     if not api_key:
         raise RuntimeError(f"Missing API key. Please export {args.api_key_env}.")
+    api_key = api_key.strip()
+    try:
+        api_key.encode("ascii")
+    except UnicodeEncodeError as exc:
+        raise RuntimeError(
+            f"{args.api_key_env} contains non-ASCII characters. "
+            "Please re-export the key with plain ASCII quotes and no extra text."
+        ) from exc
 
     endpoint = args.base_url.rstrip("/") + "/chat/completions"
     payload = {
