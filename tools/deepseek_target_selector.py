@@ -42,6 +42,11 @@ def build_parser():
     parser.add_argument("--timeout", type=float, default=60.0)
     parser.add_argument("--system-prompt", default=DEFAULT_SYSTEM_PROMPT)
     parser.add_argument(
+        "--debug",
+        action="store_true",
+        help="Print the raw DeepSeek response to stderr for debugging.",
+    )
+    parser.add_argument(
         "--mock-first-index",
         action="store_true",
         help="For local plumbing tests: output the first index in the prompt without calling the API.",
@@ -87,7 +92,17 @@ def chat_completion(args, prompt):
         raise RuntimeError(f"DeepSeek API error {response.status_code}: {response.text}")
 
     data = response.json()
-    return data["choices"][0]["message"]["content"].strip()
+    if args.debug:
+        print(json.dumps(data, ensure_ascii=False), file=sys.stderr)
+
+    message = data["choices"][0].get("message", {})
+    content = message.get("content")
+    if content is None:
+        content = message.get("reasoning_content", "")
+    content = str(content).strip()
+    if not content:
+        raise RuntimeError(f"DeepSeek returned an empty message: {json.dumps(data, ensure_ascii=False)}")
+    return content
 
 
 def main():
