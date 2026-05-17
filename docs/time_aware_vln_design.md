@@ -354,11 +354,10 @@ tools/deepseek_target_selector.py
 
 ```bash
 export DEEPSEEK_API_KEY="你的 DeepSeek API key"
-export DEEPSEEK_MODEL="deepseek-chat"
 
 tools/run_time_aware_llm_planner.py \
   --planner llm \
-  --llm-command "python tools/deepseek_target_selector.py"
+  --llm-command "python tools/deepseek_target_selector.py --model deepseek-chat"
 ```
 
 DeepSeek selector 的解码参数默认固定为：
@@ -367,7 +366,7 @@ DeepSeek selector 的解码参数默认固定为：
 temperature = 0
 top_p = 1
 max_tokens = 32
-thinking = disabled
+thinking = auto
 ```
 
 这样可以尽量保证同一 prompt 下的结果可复现。API key 只从环境变量读取，不写入代码、不提交到 GitHub。

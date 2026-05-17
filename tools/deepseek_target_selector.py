@@ -43,9 +43,9 @@ def build_parser():
     parser.add_argument("--max-tokens", type=int, default=32)
     parser.add_argument(
         "--thinking",
-        default=os.environ.get("DEEPSEEK_THINKING", "disabled"),
-        choices=["enabled", "disabled"],
-        help="DeepSeek V4 thinking mode. Disabled by default so the API returns content directly.",
+        default=os.environ.get("DEEPSEEK_THINKING", "auto"),
+        choices=["auto", "enabled", "disabled"],
+        help="DeepSeek V4 thinking mode. Auto disables thinking for V4 models and omits it for chat models.",
     )
     parser.add_argument("--timeout", type=float, default=60.0)
     parser.add_argument("--system-prompt", default=DEFAULT_SYSTEM_PROMPT)
@@ -94,8 +94,12 @@ def chat_completion(args, prompt):
         "top_p": args.top_p,
         "max_tokens": args.max_tokens,
         "stream": False,
-        "thinking": {"type": args.thinking},
     }
+    thinking = args.thinking
+    if thinking == "auto" and "v4" in args.model.lower():
+        thinking = "disabled"
+    if thinking != "auto":
+        payload["thinking"] = {"type": thinking}
     response = requests.post(
         endpoint,
         headers={

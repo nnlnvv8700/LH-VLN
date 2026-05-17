@@ -209,10 +209,6 @@ HABITAT_SIM_LOG=quiet MAGNUM_LOG=quiet EGL_PLATFORM=surfaceless \
 
 ```bash
 export DEEPSEEK_API_KEY="你的 DeepSeek API key"
-# 可选：如果账号使用新模型名，可以改成 deepseek-v4-flash 或 deepseek-v4-pro
-export DEEPSEEK_MODEL="deepseek-chat"
-# DeepSeek V4 默认可能开启 thinking mode；目标选择任务默认关闭即可
-export DEEPSEEK_THINKING="disabled"
 
 HABITAT_SIM_LOG=quiet MAGNUM_LOG=quiet EGL_PLATFORM=surfaceless \
   /file_system/vepfs/algorithm/intern03/.conda/envs/lhvln/bin/python \
@@ -221,7 +217,7 @@ HABITAT_SIM_LOG=quiet MAGNUM_LOG=quiet EGL_PLATFORM=surfaceless \
   --limit 2 \
   --budget-ratio 0.5 \
   --planner llm \
-  --llm-command "/file_system/vepfs/algorithm/intern03/.conda/envs/lhvln/bin/python tools/deepseek_target_selector.py" \
+  --llm-command "/file_system/vepfs/algorithm/intern03/.conda/envs/lhvln/bin/python tools/deepseek_target_selector.py --model deepseek-chat" \
   --time-prompt explicit \
   --output-dir output/time_aware/deepseek_val \
   --summary-csv output/time_aware/deepseek_val/summary.csv \
