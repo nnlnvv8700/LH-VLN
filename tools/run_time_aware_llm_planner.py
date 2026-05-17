@@ -94,6 +94,10 @@ def build_prompt(args, record, sim):
 
     return f"""You are a high-level planner for a time-aware VLN task.
 Choose the next target for the navigation system.
+The targets are unordered: you do not need to follow the order in the instruction.
+Your goal is to maximize the number of completed targets before the budget runs out.
+When time is limited, prefer a target that is likely reachable soon.
+The estimated_distance value is the shortest-path distance from the current position; smaller is usually better.
 
 {time_text}
 
@@ -105,7 +109,7 @@ Completed targets: {completed_text}
 Remaining targets:
 {format_targets(record, sim)}
 
-Only output one target index from the remaining targets.
+Only output one target index from the remaining targets. Output the integer only.
 """
 
 

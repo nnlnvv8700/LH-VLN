@@ -14,8 +14,10 @@ import sys
 import requests
 
 
-DEFAULT_SYSTEM_PROMPT = """You are a deterministic target selector for a time-aware VLN benchmark.
-The user prompt lists remaining navigation targets with integer indices.
+DEFAULT_SYSTEM_PROMPT = """You are a deterministic target selector for a time-aware unordered multi-target VLN benchmark.
+The user prompt lists remaining navigation targets with integer indices and estimated distances.
+The targets are unordered. Do not blindly follow the instruction order.
+Choose the target that maximizes useful progress under the time budget, usually a reachable nearby target when time is tight.
 Return exactly one remaining target index and nothing else.
 Do not explain your choice."""
 
