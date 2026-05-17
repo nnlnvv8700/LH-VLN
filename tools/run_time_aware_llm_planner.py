@@ -153,10 +153,11 @@ def choose_target_with_llm(args, sim, prompt):
         check=False,
         shell=True,
     )
-    raw_response = completed.stdout.strip()
+    stdout = completed.stdout.strip()
+    raw_response = stdout
     if completed.stderr.strip():
         raw_response = f"{raw_response}\n[stderr]\n{completed.stderr.strip()}".strip()
-    target_index = parse_target_index(raw_response, remaining)
+    target_index = parse_target_index(stdout, remaining)
 
     if target_index is not None:
         return target_index, raw_response

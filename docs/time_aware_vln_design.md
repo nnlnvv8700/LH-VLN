@@ -344,6 +344,33 @@ tools/run_time_aware_llm_planner.py
 - `first` / `random`：简单 sanity check。
 - `llm`：把 prompt 通过 stdin 交给外部命令，外部命令在 stdout 输出目标 index。
 
+当前已经加入 DeepSeek API selector：
+
+```bash
+tools/deepseek_target_selector.py
+```
+
+使用方式：
+
+```bash
+export DEEPSEEK_API_KEY="你的 DeepSeek API key"
+export DEEPSEEK_MODEL="deepseek-chat"
+
+tools/run_time_aware_llm_planner.py \
+  --planner llm \
+  --llm-command "python tools/deepseek_target_selector.py"
+```
+
+DeepSeek selector 的解码参数默认固定为：
+
+```text
+temperature = 0
+top_p = 1
+max_tokens = 16
+```
+
+这样可以尽量保证同一 prompt 下的结果可复现。API key 只从环境变量读取，不写入代码、不提交到 GitHub。
+
 当前 prompt 模式：
 
 - `explicit`：每一步给 total step budget、used steps、remaining steps。

@@ -205,6 +205,46 @@ HABITAT_SIM_LOG=quiet MAGNUM_LOG=quiet EGL_PLATFORM=surfaceless \
   --save-prompts
 ```
 
+当前已经提供 DeepSeek API selector：
+
+```bash
+export DEEPSEEK_API_KEY="你的 DeepSeek API key"
+# 可选：如果账号使用新模型名，可以改成 deepseek-v4-flash 或 deepseek-v4-pro
+export DEEPSEEK_MODEL="deepseek-chat"
+
+HABITAT_SIM_LOG=quiet MAGNUM_LOG=quiet EGL_PLATFORM=surfaceless \
+  /file_system/vepfs/algorithm/intern03/.conda/envs/lhvln/bin/python \
+  tools/run_time_aware_llm_planner.py \
+  --split val \
+  --limit 2 \
+  --budget-ratio 0.5 \
+  --planner llm \
+  --llm-command "/file_system/vepfs/algorithm/intern03/.conda/envs/lhvln/bin/python tools/deepseek_target_selector.py" \
+  --time-prompt explicit \
+  --output-dir output/time_aware/deepseek_val \
+  --summary-csv output/time_aware/deepseek_val/summary.csv \
+  --quiet \
+  --save-prompts
+```
+
+本地不联网测试 DeepSeek selector 和 planner 链路：
+
+```bash
+HABITAT_SIM_LOG=quiet MAGNUM_LOG=quiet EGL_PLATFORM=surfaceless \
+  /file_system/vepfs/algorithm/intern03/.conda/envs/lhvln/bin/python \
+  tools/run_time_aware_llm_planner.py \
+  --split val \
+  --limit 1 \
+  --budget-ratio 0.5 \
+  --planner llm \
+  --llm-command "/file_system/vepfs/algorithm/intern03/.conda/envs/lhvln/bin/python tools/deepseek_target_selector.py --mock-first-index" \
+  --time-prompt explicit \
+  --output-dir output/time_aware/deepseek_mock_smoke \
+  --summary-csv output/time_aware/deepseek_mock_smoke/summary.csv \
+  --quiet \
+  --save-prompts
+```
+
 时间 prompt 支持三种：
 
 - `explicit`：每一步给 total step budget、used steps、remaining steps。
@@ -237,6 +277,7 @@ tools/inspect_time_aware_data.py
 tools/run_time_aware_greedy.py
 tools/run_time_aware_oracle_ordering.py
 tools/run_time_aware_llm_planner.py
+tools/deepseek_target_selector.py
 habitat_base/time_aware_simulation.py
 docs/lhvln_environment.md
 ```
