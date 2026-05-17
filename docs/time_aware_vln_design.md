@@ -366,7 +366,8 @@ DeepSeek selector 的解码参数默认固定为：
 ```text
 temperature = 0
 top_p = 1
-max_tokens = 16
+max_tokens = 32
+thinking = disabled
 ```
 
 这样可以尽量保证同一 prompt 下的结果可复现。API key 只从环境变量读取，不写入代码、不提交到 GitHub。

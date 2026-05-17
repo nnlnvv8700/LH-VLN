@@ -40,7 +40,13 @@ def build_parser():
     )
     parser.add_argument("--temperature", type=float, default=0.0)
     parser.add_argument("--top-p", type=float, default=1.0)
-    parser.add_argument("--max-tokens", type=int, default=16)
+    parser.add_argument("--max-tokens", type=int, default=32)
+    parser.add_argument(
+        "--thinking",
+        default=os.environ.get("DEEPSEEK_THINKING", "disabled"),
+        choices=["enabled", "disabled"],
+        help="DeepSeek V4 thinking mode. Disabled by default so the API returns content directly.",
+    )
     parser.add_argument("--timeout", type=float, default=60.0)
     parser.add_argument("--system-prompt", default=DEFAULT_SYSTEM_PROMPT)
     parser.add_argument(
@@ -88,6 +94,7 @@ def chat_completion(args, prompt):
         "top_p": args.top_p,
         "max_tokens": args.max_tokens,
         "stream": False,
+        "thinking": {"type": args.thinking},
     }
     response = requests.post(
         endpoint,
