@@ -157,6 +157,8 @@ def choose_target_with_llm(args, sim, prompt):
     raw_response = stdout
     if completed.stderr.strip():
         raw_response = f"{raw_response}\n[stderr]\n{completed.stderr.strip()}".strip()
+    if completed.returncode != 0:
+        raw_response = f"{raw_response}\n[returncode]\n{completed.returncode}".strip()
     target_index = parse_target_index(stdout, remaining)
 
     if target_index is not None:
@@ -202,8 +204,30 @@ def run_episode(args, record):
             prompt = build_prompt(args, record, sim)
             target_index, raw_response = choose_target(args, record, sim, prompt)
             if target_index is None:
+                planner_trace.append(
+                    {
+                        "time_used": sim.time_used,
+                        "time_remaining": sim.time_remaining,
+                        "prompt": prompt if args.save_prompts else None,
+                        "raw_response": raw_response,
+                        "target_index": None,
+                        "target": None,
+                        "event": "planner_returned_no_valid_target",
+                    }
+                )
                 break
             if target_index not in sim.remaining_targets:
+                planner_trace.append(
+                    {
+                        "time_used": sim.time_used,
+                        "time_remaining": sim.time_remaining,
+                        "prompt": prompt if args.save_prompts else None,
+                        "raw_response": raw_response,
+                        "target_index": target_index,
+                        "target": None,
+                        "event": "planner_selected_completed_or_invalid_target",
+                    }
+                )
                 sim._abandon_target(target_index, "planner_selected_completed_or_invalid_target")
                 continue
 
@@ -215,6 +239,7 @@ def run_episode(args, record):
                     "raw_response": raw_response,
                     "target_index": target_index,
                     "target": record["targets"][target_index]["name"],
+                    "event": "planner_selected_target",
                 }
             )
             navigate_to_target(sim, target_index)
