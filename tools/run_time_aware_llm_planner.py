@@ -148,15 +148,24 @@ def choose_target_with_llm(args, sim, prompt):
         raise ValueError("--planner llm requires --llm-command")
 
     remaining = sorted(sim.remaining_targets)
-    completed = subprocess.run(
-        args.llm_command,
-        input=prompt,
-        text=True,
-        capture_output=True,
-        timeout=args.llm_timeout,
-        check=False,
-        shell=True,
-    )
+    try:
+        completed = subprocess.run(
+            args.llm_command,
+            input=prompt,
+            text=True,
+            capture_output=True,
+            timeout=args.llm_timeout,
+            check=False,
+            shell=True,
+        )
+    except subprocess.TimeoutExpired as exc:
+        raw_response = f"[stderr]\nLLM command timed out after {args.llm_timeout} seconds"
+        if exc.stdout:
+            raw_response = f"{exc.stdout.strip()}\n{raw_response}".strip()
+        if exc.stderr:
+            raw_response = f"{raw_response}\n{exc.stderr.strip()}".strip()
+        return invalid_llm_fallback(args, sim, remaining, raw_response)
+
     stdout = completed.stdout.strip()
     raw_response = stdout
     if completed.stderr.strip():
@@ -167,6 +176,10 @@ def choose_target_with_llm(args, sim, prompt):
 
     if target_index is not None:
         return target_index, raw_response
+    return invalid_llm_fallback(args, sim, remaining, raw_response)
+
+
+def invalid_llm_fallback(args, sim, remaining, raw_response):
     if args.invalid_llm_choice == "first":
         return remaining[0], raw_response
     if args.invalid_llm_choice == "nearest":
