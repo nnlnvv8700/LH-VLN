@@ -11,6 +11,7 @@ scene-level time.
 """
 
 import argparse
+import csv
 import json
 import math
 import statistics
@@ -160,6 +161,57 @@ def count_start_floor_targets(start_position, targets, floor_threshold):
     )
 
 
+def scene_split(scene):
+    return "train" if int(scene[2]) < 8 else "val"
+
+
+def scene_asset_paths(scene, scene_root):
+    split = scene_split(scene)
+    scene_name = scene.split("-")[-1]
+    scene_dir = Path(scene_root) / split / scene
+    return {
+        "scene_split": split,
+        "scene_path": str(scene_dir / f"{scene_name}.basis.glb"),
+        "navmesh_path": str(scene_dir / f"{scene_name}.basis.navmesh"),
+    }
+
+
+def annotate_floor_metadata(start_position, targets, floor_threshold):
+    points = []
+    if start_position is not None:
+        points.append(start_position)
+    points.extend(
+        target["target_position"]
+        for target in targets
+        if target.get("target_position") is not None
+    )
+    floor_heights = cluster_floor_heights(points, floor_threshold)
+    start_floor_id = nearest_floor_index(start_position, floor_heights)
+    targets_on_start_floor = []
+    targets_off_start_floor = []
+    for target in targets:
+        target["target_id"] = target.get("global_index")
+        if target.get("target_position") is not None:
+            target["position"] = target["target_position"]
+            target_floor_id = nearest_floor_index(target["target_position"], floor_heights)
+            target["floor_id"] = target_floor_id
+            if target_floor_id == start_floor_id:
+                targets_on_start_floor.append(target["global_index"])
+            else:
+                targets_off_start_floor.append(target["global_index"])
+        else:
+            target["floor_id"] = None
+            targets_off_start_floor.append(target["global_index"])
+    return {
+        "floor_threshold": floor_threshold,
+        "floor_heights": floor_heights,
+        "start_floor_id": start_floor_id,
+        "targets_on_start_floor": targets_on_start_floor,
+        "targets_off_start_floor": targets_off_start_floor,
+        "num_start_floor_targets": len(targets_on_start_floor),
+    }
+
+
 def choose_scene_targets(
     records,
     min_targets,
@@ -204,6 +256,10 @@ def build_scene_episode(
     budget_ratios,
     coverage,
     oracle_time_source,
+    scene_root,
+    floor_threshold,
+    success_distance,
+    benchmark_setting,
 ):
     ordered_sum = sum(
         target.get("source_ordered_gt_step") or 0
@@ -222,13 +278,22 @@ def build_scene_episode(
         if task_id not in seen_task_ids:
             seen_task_ids.add(task_id)
             source_tasks.append(task_lookup[task_id])
+    start_position = source_tasks[0].get("start_position")
+    floor_metadata = annotate_floor_metadata(
+        start_position,
+        selected_targets,
+        floor_threshold,
+    )
+    asset_paths = scene_asset_paths(scene, scene_root)
 
     scene_episode = {
+        "episode_id": f"{split}/{scene}/stitched_0",
         "scene_episode_id": f"{split}/{scene}/stitched_0",
         "split": split,
         "scene": scene,
+        **asset_paths,
         "robot": source_tasks[0].get("robot"),
-        "start_position": source_tasks[0].get("start_position"),
+        "start_position": start_position,
         "start_yaw": source_tasks[0].get("start_yaw"),
         "scene_level": True,
         "unordered_tasks": True,
@@ -243,10 +308,17 @@ def build_scene_episode(
             for index, task in enumerate(source_tasks)
         ),
         "targets": selected_targets,
+        **floor_metadata,
         "oracle_time_proxy_ordered_sum": oracle_time_proxy,
+        "oracle_optimal_time": None,
+        "oracle_optimal_order": None,
         "oracle_time_source": oracle_time_source,
         "time_budgets": budgets,
         "budget_ratios": budget_ratios,
+        "budget_unit": "step",
+        "success_distance": success_distance,
+        "target_value_type": "uniform",
+        "benchmark_setting": benchmark_setting,
         "coverage_target": coverage,
         "source_total_tasks_in_scene": scene_task_count,
         "source_total_targets_in_scene": sum(len(task.get("targets", [])) for task in scene_records),
@@ -277,11 +349,53 @@ def write_jsonl(path, records):
     return output
 
 
+def write_summary_csv(path, records, budget_ratios):
+    output = Path(path)
+    output.parent.mkdir(parents=True, exist_ok=True)
+    fieldnames = [
+        "episode_id",
+        "split",
+        "scene",
+        "scene_split",
+        "robot",
+        "num_targets",
+        "num_start_floor_targets",
+        "num_off_start_floor_targets",
+        "num_source_tasks",
+        "oracle_time_source",
+        "oracle_time_proxy_ordered_sum",
+    ]
+    fieldnames.extend(f"budget_{ratio}" for ratio in budget_ratios)
+    with output.open("w", encoding="utf-8", newline="") as handle:
+        writer = csv.DictWriter(handle, fieldnames=fieldnames)
+        writer.writeheader()
+        for record in records:
+            row = {
+                "episode_id": record["episode_id"],
+                "split": record["split"],
+                "scene": record["scene"],
+                "scene_split": record["scene_split"],
+                "robot": record["robot"],
+                "num_targets": record["num_targets"],
+                "num_start_floor_targets": record["num_start_floor_targets"],
+                "num_off_start_floor_targets": len(record["targets_off_start_floor"]),
+                "num_source_tasks": record["num_source_tasks"],
+                "oracle_time_source": record["oracle_time_source"],
+                "oracle_time_proxy_ordered_sum": record["oracle_time_proxy_ordered_sum"],
+            }
+            for ratio in budget_ratios:
+                row[f"budget_{ratio}"] = record["time_budgets"][str(ratio)]
+            writer.writerow(row)
+    return output
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--input", default="data/time_aware/episodes.jsonl")
     parser.add_argument("--output", default="data/time_aware_scene/test_episodes.jsonl")
+    parser.add_argument("--summary-csv", default=None)
     parser.add_argument("--split", default="test")
+    parser.add_argument("--scene-root", default="data/hm3d")
     parser.add_argument("--min-targets", type=int, default=4)
     parser.add_argument("--max-targets", type=int, default=8)
     parser.add_argument("--coverage", type=float, default=0.8)
@@ -314,6 +428,8 @@ def main():
         help="Y-distance threshold in meters for grouping floors.",
     )
     parser.add_argument("--budget-ratios", default="0.5,1.0,1.5")
+    parser.add_argument("--success-distance", type=float, default=1.0)
+    parser.add_argument("--benchmark-setting", default="start_floor")
     parser.add_argument(
         "--oracle-time-source",
         default="ordered_sum_proxy",
@@ -378,10 +494,17 @@ def main():
                 budget_ratios,
                 args.coverage,
                 args.oracle_time_source,
+                args.scene_root,
+                args.floor_threshold,
+                args.success_distance,
+                args.benchmark_setting,
             )
         )
 
     output = write_jsonl(args.output, scene_episodes)
+    summary_output = None
+    if args.summary_csv:
+        summary_output = write_summary_csv(args.summary_csv, scene_episodes, budget_ratios)
 
     task_counts = [record["num_source_tasks"] for record in scene_episodes]
     target_counts = [len(record["targets"]) for record in scene_episodes]
@@ -440,6 +563,8 @@ def main():
         print(f"budget_ratio_{key}: {describe(values)}")
     print("selected target count distribution:", dict(sorted(Counter(target_counts).items())))
     print(f"wrote: {output}")
+    if summary_output:
+        print(f"wrote: {summary_output}")
 
     if scene_episodes:
         print("\nsample:")
