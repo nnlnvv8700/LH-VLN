@@ -8,6 +8,7 @@ for fast dataset inspection and annotation sanity checks.
 
 import argparse
 import json
+import math
 import random
 import textwrap
 from pathlib import Path
@@ -48,10 +49,61 @@ def to_pixel(pathfinder, point, meters_per_pixel):
     return px, py
 
 
+def cluster_floor_heights(points, threshold):
+    heights = sorted(float(point[1]) for point in points if point is not None)
+    floors = []
+    for height in heights:
+        if not floors or abs(height - floors[-1][-1]) > threshold:
+            floors.append([height])
+        else:
+            floors[-1].append(height)
+    return [sum(group) / len(group) for group in floors]
+
+
+def nearest_floor_index(point, floors):
+    if point is None or not floors:
+        return None
+    height = float(point[1])
+    return min(range(len(floors)), key=lambda index: abs(height - floors[index]))
+
+
 def target_label(target):
     name = target.get("name", "unknown")
     region = target.get("region_name") or "unknown"
     return f"{target.get('global_index')}: {name} ({region})"
+
+
+def episode_text_lines(episode, targets_missing=None, map_note=None):
+    targets_missing = targets_missing or []
+    budgets = ", ".join(f"{key}: {value}" for key, value in episode.get("time_budgets", {}).items())
+    lines = [
+        f"Scene episode: {episode['scene_episode_id']}",
+        f"Scene: {episode['scene']}",
+        f"Robot: {episode.get('robot')}",
+        f"Source tasks: {episode.get('num_source_tasks')} | Targets: {len(episode.get('targets', []))}",
+        f"Oracle time proxy: {episode.get('oracle_time_proxy_ordered_sum')}",
+        f"Budgets: {budgets}",
+    ]
+    if map_note:
+        lines.append(map_note)
+    lines.extend(["", "Targets:"])
+    for target in episode.get("targets", []):
+        pos_flag = "pos" if target.get("target_position") is not None else "missing-pos"
+        y_text = ""
+        if target.get("target_position") is not None:
+            y_text = f", y={float(target['target_position'][1]):.2f}"
+        lines.append(f"- {target_label(target)} [{pos_flag}{y_text}] from {target.get('source_task_id')}")
+    if targets_missing:
+        lines.append("")
+        lines.append(f"Missing target positions: {len(targets_missing)}")
+    lines.append("")
+    lines.append("Instructions:")
+    for index, instruction in enumerate(episode.get("instructions", []), start=1):
+        wrapped = textwrap.wrap(instruction or "", width=64)
+        lines.append(f"{index}. {wrapped[0] if wrapped else ''}")
+        for extra in wrapped[1:]:
+            lines.append(f"   {extra}")
+    return lines
 
 
 def draw_episode(episode, output_path):
@@ -260,6 +312,107 @@ def draw_episode_on_navmesh(episode, output_path, scene_root, scene_dataset, met
         sim.close()
 
 
+def draw_episode_on_multifloor_navmesh(
+    episode,
+    output_path,
+    scene_root,
+    scene_dataset,
+    meters_per_pixel,
+    floor_threshold,
+):
+    sim = make_sim_for_episode(episode, scene_root, scene_dataset)
+    try:
+        pathfinder = sim.pathfinder
+        if not pathfinder.is_loaded:
+            raise RuntimeError(f"Pathfinder is not loaded for scene {episode['scene']}")
+
+        start = episode.get("start_position")
+        targets_with_pos = [
+            target for target in episode.get("targets", [])
+            if target.get("target_position") is not None
+        ]
+        targets_missing = [
+            target for target in episode.get("targets", [])
+            if target.get("target_position") is None
+        ]
+        floor_points = []
+        if start is not None:
+            floor_points.append(start)
+        floor_points.extend(target["target_position"] for target in targets_with_pos)
+        floors = cluster_floor_heights(floor_points, floor_threshold)
+        if not floors:
+            floors = [float(pathfinder.get_bounds()[0][1])]
+
+        n_floors = len(floors)
+        n_cols = min(3, n_floors)
+        n_rows = int(math.ceil(n_floors / n_cols))
+        fig = plt.figure(figsize=(5.2 * n_cols + 6.2, 5.0 * n_rows), dpi=150)
+        grid = fig.add_gridspec(n_rows, n_cols + 1, width_ratios=[1.0] * n_cols + [1.15])
+        axes = []
+        for floor_index, floor_height in enumerate(floors):
+            row = floor_index // n_cols
+            col = floor_index % n_cols
+            ax = fig.add_subplot(grid[row, col])
+            axes.append(ax)
+
+            topdown = pathfinder.get_topdown_view(meters_per_pixel, floor_height)
+            image = np.zeros((*topdown.shape, 3), dtype=np.uint8)
+            image[topdown > 0] = [242, 242, 242]
+            image[topdown == 0] = [36, 36, 36]
+            ax.imshow(image)
+            ax.set_axis_off()
+            ax.set_title(f"floor {floor_index}: y={floor_height:.2f}")
+
+        for empty_index in range(n_floors, n_rows * n_cols):
+            row = empty_index // n_cols
+            col = empty_index % n_cols
+            ax = fig.add_subplot(grid[row, col])
+            ax.axis("off")
+
+        if start is not None:
+            floor_index = nearest_floor_index(start, floors)
+            sx, sy = to_pixel(pathfinder, start, meters_per_pixel)
+            axes[floor_index].scatter([sx], [sy], marker="*", s=260, c="#d62728", edgecolors="black", linewidths=0.8)
+            axes[floor_index].annotate("START", (sx, sy), xytext=(6, 6), textcoords="offset points", fontsize=9, weight="bold")
+
+        colors = plt.cm.tab10.colors
+        for target in targets_with_pos:
+            floor_index = nearest_floor_index(target["target_position"], floors)
+            tx, ty = to_pixel(pathfinder, target["target_position"], meters_per_pixel)
+            index = int(target.get("global_index", 0))
+            color = colors[index % len(colors)]
+            axes[floor_index].scatter([tx], [ty], s=120, c=[color], edgecolors="black", linewidths=0.7)
+            axes[floor_index].annotate(str(index), (tx, ty), xytext=(5, 5), textcoords="offset points", fontsize=10, weight="bold")
+
+        text_ax = fig.add_subplot(grid[:, n_cols])
+        text_ax.axis("off")
+        lines = episode_text_lines(
+            episode,
+            targets_missing=targets_missing,
+            map_note=f"Map: multi-floor Habitat navmesh, {meters_per_pixel} m/px",
+        )
+        text_ax.text(
+            0.0,
+            1.0,
+            "\n".join(lines),
+            va="top",
+            ha="left",
+            fontsize=8,
+            family="monospace",
+            linespacing=1.25,
+        )
+        fig.suptitle(f"{episode['scene_episode_id']} | multi-floor navmesh", fontsize=12)
+
+        output_path = Path(output_path)
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        fig.tight_layout()
+        fig.savefig(output_path)
+        plt.close(fig)
+        return output_path
+    finally:
+        sim.close()
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--episodes", default="data/time_aware_scene/test_episodes.jsonl")
@@ -269,6 +422,8 @@ def main():
     parser.add_argument("--random", type=int, default=0, help="Randomly visualize N episodes.")
     parser.add_argument("--seed", type=int, default=0)
     parser.add_argument("--real-map", action="store_true", help="Render Habitat-Sim navmesh top-down map.")
+    parser.add_argument("--multi-floor", action="store_true", help="Render one navmesh slice per detected floor.")
+    parser.add_argument("--floor-threshold", type=float, default=0.75, help="Y-distance threshold in meters for floor grouping.")
     parser.add_argument("--scene", default="data/hm3d/")
     parser.add_argument(
         "--scene-dataset",
@@ -293,7 +448,16 @@ def main():
     output_dir = Path(args.output_dir)
     for episode in selected:
         filename = safe_name(episode["scene_episode_id"]) + ".png"
-        if args.real_map:
+        if args.multi_floor:
+            output = draw_episode_on_multifloor_navmesh(
+                episode,
+                output_dir / filename,
+                args.scene,
+                args.scene_dataset,
+                args.meters_per_pixel,
+                args.floor_threshold,
+            )
+        elif args.real_map:
             output = draw_episode_on_navmesh(
                 episode,
                 output_dir / filename,
