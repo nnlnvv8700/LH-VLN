@@ -73,8 +73,9 @@ def target_label(target):
     return f"{target.get('global_index')}: {name} ({region})"
 
 
-def episode_text_lines(episode, targets_missing=None, map_note=None):
+def episode_text_lines(episode, targets_missing=None, map_note=None, hidden_target_indices=None):
     targets_missing = targets_missing or []
+    hidden_target_indices = set(hidden_target_indices or [])
     budgets = ", ".join(f"{key}: {value}" for key, value in episode.get("time_budgets", {}).items())
     lines = [
         f"Scene episode: {episode['scene_episode_id']}",
@@ -92,7 +93,8 @@ def episode_text_lines(episode, targets_missing=None, map_note=None):
         y_text = ""
         if target.get("target_position") is not None:
             y_text = f", y={float(target['target_position'][1]):.2f}"
-        lines.append(f"- {target_label(target)} [{pos_flag}{y_text}] from {target.get('source_task_id')}")
+        hidden_text = ", hidden-off-floor" if target.get("global_index") in hidden_target_indices else ""
+        lines.append(f"- {target_label(target)} [{pos_flag}{y_text}{hidden_text}] from {target.get('source_task_id')}")
     if targets_missing:
         lines.append("")
         lines.append(f"Missing target positions: {len(targets_missing)}")
@@ -413,6 +415,108 @@ def draw_episode_on_multifloor_navmesh(
         sim.close()
 
 
+def draw_episode_on_start_floor_navmesh(
+    episode,
+    output_path,
+    scene_root,
+    scene_dataset,
+    meters_per_pixel,
+    floor_threshold,
+):
+    sim = make_sim_for_episode(episode, scene_root, scene_dataset)
+    try:
+        pathfinder = sim.pathfinder
+        if not pathfinder.is_loaded:
+            raise RuntimeError(f"Pathfinder is not loaded for scene {episode['scene']}")
+
+        start = episode.get("start_position")
+        targets_with_pos = [
+            target for target in episode.get("targets", [])
+            if target.get("target_position") is not None
+        ]
+        targets_missing = [
+            target for target in episode.get("targets", [])
+            if target.get("target_position") is None
+        ]
+        floor_points = []
+        if start is not None:
+            floor_points.append(start)
+        floor_points.extend(target["target_position"] for target in targets_with_pos)
+        floors = cluster_floor_heights(floor_points, floor_threshold)
+        if not floors:
+            floors = [float(pathfinder.get_bounds()[0][1])]
+
+        start_floor_index = nearest_floor_index(start, floors) if start is not None else 0
+        floor_height = floors[start_floor_index]
+        topdown = pathfinder.get_topdown_view(meters_per_pixel, floor_height)
+        image = np.zeros((*topdown.shape, 3), dtype=np.uint8)
+        image[topdown > 0] = [242, 242, 242]
+        image[topdown == 0] = [36, 36, 36]
+
+        hidden_target_indices = []
+        visible_targets = []
+        for target in targets_with_pos:
+            target_floor_index = nearest_floor_index(target["target_position"], floors)
+            if target_floor_index == start_floor_index:
+                visible_targets.append(target)
+            else:
+                hidden_target_indices.append(target.get("global_index"))
+
+        fig = plt.figure(figsize=(15, 8.5), dpi=150)
+        grid = fig.add_gridspec(1, 2, width_ratios=[1.25, 1.0])
+        ax = fig.add_subplot(grid[0, 0])
+        text_ax = fig.add_subplot(grid[0, 1])
+        text_ax.axis("off")
+        ax.imshow(image)
+        ax.set_axis_off()
+        ax.set_title(
+            f"{episode['scene_episode_id']} | start floor y={floor_height:.2f} "
+            f"({len(visible_targets)}/{len(targets_with_pos)} targets shown)"
+        )
+
+        if start is not None:
+            sx, sy = to_pixel(pathfinder, start, meters_per_pixel)
+            ax.scatter([sx], [sy], marker="*", s=260, c="#d62728", edgecolors="black", linewidths=0.8)
+            ax.annotate("START", (sx, sy), xytext=(6, 6), textcoords="offset points", fontsize=9, weight="bold")
+
+        colors = plt.cm.tab10.colors
+        for target in visible_targets:
+            tx, ty = to_pixel(pathfinder, target["target_position"], meters_per_pixel)
+            index = int(target.get("global_index", 0))
+            color = colors[index % len(colors)]
+            ax.scatter([tx], [ty], s=120, c=[color], edgecolors="black", linewidths=0.7)
+            ax.annotate(str(index), (tx, ty), xytext=(5, 5), textcoords="offset points", fontsize=10, weight="bold")
+
+        lines = episode_text_lines(
+            episode,
+            targets_missing=targets_missing,
+            map_note=(
+                f"Map: start-floor Habitat navmesh, {meters_per_pixel} m/px; "
+                f"hidden off-floor targets: {len(hidden_target_indices)}"
+            ),
+            hidden_target_indices=hidden_target_indices,
+        )
+        text_ax.text(
+            0.0,
+            1.0,
+            "\n".join(lines),
+            va="top",
+            ha="left",
+            fontsize=8,
+            family="monospace",
+            linespacing=1.25,
+        )
+
+        output_path = Path(output_path)
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        fig.tight_layout()
+        fig.savefig(output_path)
+        plt.close(fig)
+        return output_path
+    finally:
+        sim.close()
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--episodes", default="data/time_aware_scene/test_episodes.jsonl")
@@ -423,6 +527,7 @@ def main():
     parser.add_argument("--seed", type=int, default=0)
     parser.add_argument("--real-map", action="store_true", help="Render Habitat-Sim navmesh top-down map.")
     parser.add_argument("--multi-floor", action="store_true", help="Render one navmesh slice per detected floor.")
+    parser.add_argument("--start-floor-only", action="store_true", help="Render only the floor that contains the start position.")
     parser.add_argument("--floor-threshold", type=float, default=0.75, help="Y-distance threshold in meters for floor grouping.")
     parser.add_argument("--scene", default="data/hm3d/")
     parser.add_argument(
@@ -448,7 +553,16 @@ def main():
     output_dir = Path(args.output_dir)
     for episode in selected:
         filename = safe_name(episode["scene_episode_id"]) + ".png"
-        if args.multi_floor:
+        if args.start_floor_only:
+            output = draw_episode_on_start_floor_navmesh(
+                episode,
+                output_dir / filename,
+                args.scene,
+                args.scene_dataset,
+                args.meters_per_pixel,
+                args.floor_threshold,
+            )
+        elif args.multi_floor:
             output = draw_episode_on_multifloor_navmesh(
                 episode,
                 output_dir / filename,
