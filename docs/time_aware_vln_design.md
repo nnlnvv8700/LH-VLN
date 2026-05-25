@@ -417,7 +417,7 @@ LLM 选出来的目标顺序是否比 nearest greedy 更合理，
 
 ## 11. V2: Scene-Level Time-Aware VLN
 
-根据老师意见，下一阶段不再只用原始 LH-VLN 单条 episode，而是基于同一个 scene 拼接多个任务，构造更长、更接近搜索的 scene-level time-aware benchmark。
+根据老师意见，下一阶段不再只用原始 LH-VLN 单条 episode，而是基于同一个 scene 拼接多个目标点，构造更长、更接近搜索的 scene-level time-aware benchmark。
 
 ### 11.1 核心变化
 
@@ -434,7 +434,7 @@ V2 目标设定：
 
 ```text
 一个 HM3D scene
-拼接 4-8 条原始 LH-VLN tasks
+拼接 4-8 个目标点 / 事件
 形成一个更长的 scene-level episode
 agent 在有限时间内完成尽可能多任务/目标
 ```
@@ -455,8 +455,8 @@ tools/build_scene_level_time_aware_data.py
 /file_system/vepfs/algorithm/intern03/.conda/envs/lhvln/bin/python \
   tools/build_scene_level_time_aware_data.py \
   --split test \
-  --min-tasks 4 \
-  --max-tasks 8 \
+  --min-targets 4 \
+  --max-targets 8 \
   --coverage 0.8 \
   --budget-ratios 0.5,1.0,1.5 \
   --output data/time_aware_scene/test_episodes.jsonl
@@ -467,15 +467,16 @@ tools/build_scene_level_time_aware_data.py
 ```text
 source scenes: 124
 source tasks: 403
-可拼接 scenes（至少 4 个任务）: 50
-生成 scene-level episodes: 50
-每条 scene-level episode 包含任务数: 4-8，平均 4.4
-每条 scene-level episode 包含 targets 数: 8-23，平均 12.0
-对所有 test tasks 的覆盖率: 222/403 = 55.09%
-对可拼接 scenes 内 tasks 的覆盖率: 222/251 = 88.45%
+source targets: 1087
+可拼接 scenes（至少 4 个目标点）: 101
+生成 scene-level episodes: 101
+每条 scene-level episode 包含目标点数: 4-8，平均 7.0
+每条 scene-level episode 涉及原始任务数: 1-4，平均 2.9
+对所有 test targets 的覆盖率: 702/1087 = 64.58%
+对可拼接 scenes 内 targets 的覆盖率: 702/1024 = 68.55%
 ```
 
-需要注意：原始 val split 中每个 scene 只有 1-2 个任务，因此不适合直接构造 4-8 task 的 scene-level validation。后续可能需要从 train/test 的 scene 中重新划分一个 scene-level val。
+需要注意：原始 val split 中每个 scene 的目标点较少，因此可能不适合直接构造稳定的 4-8 target scene-level validation。后续可能需要从 train/test 的 scene 中重新划分一个 scene-level val。
 
 ### 11.3 时间预算
 
@@ -488,7 +489,7 @@ source tasks: 403
 当前 `build_scene_level_time_aware_data.py` 先使用：
 
 ```text
-oracle_time_proxy_ordered_sum = 被拼接任务的原始 ordered oracle steps 之和
+oracle_time_proxy_ordered_sum = 被选中目标点对应的原始 ordered oracle steps 之和
 ```
 
 作为临时 proxy，并生成：
@@ -502,7 +503,7 @@ oracle_time_proxy_ordered_sum = 被拼接任务的原始 ordered oracle steps �
 这只是数据构造 smoke test。后续需要替换为真正的 scene-level oracle time：
 
 ```text
-对拼接任务/目标做枚举或动态规划，
+对拼接目标点做枚举或动态规划，
 用 Habitat follower 实际执行，
 得到完成全部可完成任务/目标的最优时间。
 ```
