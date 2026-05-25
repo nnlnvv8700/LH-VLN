@@ -462,19 +462,23 @@ tools/build_scene_level_time_aware_data.py
   --output data/time_aware_scene/test_episodes.jsonl
 ```
 
-当前 test split 统计：
+当前 test split 统计（已在同一 scene 内对重复目标点去重）：
 
 ```text
 source scenes: 124
 source tasks: 403
 source targets: 1087
-可拼接 scenes（至少 4 个目标点）: 101
-生成 scene-level episodes: 101
-每条 scene-level episode 包含目标点数: 4-8，平均 7.0
-每条 scene-level episode 涉及原始任务数: 1-4，平均 2.9
-对所有 test targets 的覆盖率: 702/1087 = 64.58%
-对可拼接 scenes 内 targets 的覆盖率: 702/1024 = 68.55%
+去重后 unique target points: 799
+去重删除重复 target points: 288
+可拼接 scenes（去重后至少 4 个目标点）: 94
+生成 scene-level episodes: 94
+每条 scene-level episode 包含目标点数: 4-8，平均 6.0
+每条 scene-level episode 涉及原始任务数: 2-5，平均 2.8
+对所有 test targets 的覆盖率: 568/1087 = 52.25%
+对可拼接 scenes 内 unique targets 的覆盖率: 568/717 = 79.22%
 ```
+
+去重规则是保守合并：同一真实 scene 内，只有当目标的 `name`、`region_name` 和四舍五入后的 `target_position` 都一致时，才认为是同一个目标点。保留的 target 会记录 `duplicate_count` 和 `source_occurrences`，方便追溯它来自哪些原始 LH-VLN 任务。
 
 需要注意：原始 val split 中每个 scene 的目标点较少，因此可能不适合直接构造稳定的 4-8 target scene-level validation。后续可能需要从 train/test 的 scene 中重新划分一个 scene-level val。
 

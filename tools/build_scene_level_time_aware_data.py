@@ -14,6 +14,7 @@ import argparse
 import json
 import math
 import statistics
+from copy import deepcopy
 from collections import Counter, defaultdict
 from pathlib import Path
 
@@ -56,13 +57,72 @@ def flatten_scene_targets(records):
     return scene_targets
 
 
-def choose_scene_targets(records, min_targets, max_targets, coverage):
+def round_position(position, precision):
+    if position is None:
+        return None
+    return tuple(round(float(value) / precision) for value in position)
+
+
+def normalize_text(value):
+    return str(value or "").strip().lower()
+
+
+def target_dedup_key(target, position_precision):
+    return (
+        normalize_text(target.get("name")),
+        normalize_text(target.get("region_name") or target.get("region")),
+        round_position(target.get("target_position"), position_precision),
+    )
+
+
+def deduplicate_scene_targets(scene_targets, position_precision):
+    """Merge repeated target points within the same scene.
+
+    A target is considered duplicated only when it has the same object name,
+    same region label, and nearly identical 3D target position. The first
+    occurrence is kept, and all source occurrences are recorded for traceability.
+    """
+    unique_targets = []
+    by_key = {}
+    for target in scene_targets:
+        key = target_dedup_key(target, position_precision)
+        occurrence = {
+            "source_task_id": target.get("source_task_id"),
+            "source_target_index": target.get("source_target_index"),
+            "source_task_instruction": target.get("source_task_instruction"),
+            "source_ordered_gt_step": target.get("source_ordered_gt_step"),
+        }
+        if key not in by_key:
+            item = deepcopy(target)
+            item["dedup_key"] = {
+                "name": key[0],
+                "region": key[1],
+                "rounded_position": key[2],
+                "position_precision": position_precision,
+            }
+            item["source_occurrences"] = [occurrence]
+            item["duplicate_count"] = 1
+            by_key[key] = item
+            unique_targets.append(item)
+        else:
+            kept = by_key[key]
+            kept["source_occurrences"].append(occurrence)
+            kept["duplicate_count"] += 1
+    return unique_targets
+
+
+def choose_scene_targets(records, min_targets, max_targets, coverage, dedup, position_precision):
     """Choose 4-8 target points for a scene.
 
     The goal is to cover about `coverage` of available targets while staying in the
     requested 4-8 target range. Scenes with fewer than min_targets are skipped.
     """
-    scene_targets = flatten_scene_targets(records)
+    raw_scene_targets = flatten_scene_targets(records)
+    scene_targets = (
+        deduplicate_scene_targets(raw_scene_targets, position_precision)
+        if dedup
+        else raw_scene_targets
+    )
     if len(scene_targets) < min_targets:
         return []
     target_count = int(math.ceil(len(scene_targets) * coverage))
@@ -163,6 +223,17 @@ def main():
     parser.add_argument("--min-targets", type=int, default=4)
     parser.add_argument("--max-targets", type=int, default=8)
     parser.add_argument("--coverage", type=float, default=0.8)
+    parser.add_argument(
+        "--no-dedup",
+        action="store_true",
+        help="Disable target-point deduplication inside each scene.",
+    )
+    parser.add_argument(
+        "--dedup-position-precision",
+        type=float,
+        default=0.25,
+        help="Position grid size in meters for duplicate target matching.",
+    )
     parser.add_argument("--budget-ratios", default="0.5,1.0,1.5")
     parser.add_argument(
         "--oracle-time-source",
@@ -182,12 +253,23 @@ def main():
 
     scene_episodes = []
     skipped = {}
+    unique_targets_by_scene = {}
+    raw_targets_by_scene = {}
     for scene, scene_records in sorted(by_scene.items()):
+        raw_targets = flatten_scene_targets(scene_records)
+        unique_targets = deduplicate_scene_targets(
+            raw_targets,
+            args.dedup_position_precision,
+        )
+        raw_targets_by_scene[scene] = len(raw_targets)
+        unique_targets_by_scene[scene] = len(unique_targets)
         selected_targets = choose_scene_targets(
             scene_records,
             min_targets=args.min_targets,
             max_targets=args.max_targets,
             coverage=args.coverage,
+            dedup=not args.no_dedup,
+            position_precision=args.dedup_position_precision,
         )
         if not selected_targets:
             skipped[scene] = len(scene_records)
@@ -217,10 +299,11 @@ def main():
         for items in by_scene.values()
         for task in items
     )
+    available_unique_targets = sum(unique_targets_by_scene.values())
     eligible_targets = sum(
-        sum(len(task.get("targets", [])) for task in items)
-        for items in by_scene.values()
-        if sum(len(task.get("targets", [])) for task in items) >= args.min_targets
+        unique_targets_by_scene[scene] if not args.no_dedup else raw_targets_by_scene[scene]
+        for scene in by_scene
+        if (unique_targets_by_scene[scene] if not args.no_dedup else raw_targets_by_scene[scene]) >= args.min_targets
     )
     covered_targets = sum(target_counts)
     source_scene_counts = [len(items) for items in by_scene.values()]
@@ -236,6 +319,10 @@ def main():
     print(f"source tasks: {available_tasks}")
     print(f"source tasks per scene: {describe(source_scene_counts)}")
     print(f"source targets: {available_targets}")
+    print(f"unique target points after dedup: {available_unique_targets}")
+    print(f"duplicate target points removed: {available_targets - available_unique_targets}")
+    print(f"target deduplication: {'off' if args.no_dedup else 'on'}")
+    print(f"dedup position precision: {args.dedup_position_precision} m")
     print(f"source targets per scene: {describe(source_target_counts)}")
     print(f"stitched episodes: {len(scene_episodes)}")
     print(f"skipped scenes (<{args.min_targets} targets): {len(skipped)}")
