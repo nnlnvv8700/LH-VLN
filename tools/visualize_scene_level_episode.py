@@ -265,6 +265,7 @@ def main():
     parser.add_argument("--episodes", default="data/time_aware_scene/test_episodes.jsonl")
     parser.add_argument("--output-dir", default="output/time_aware_scene/visualizations")
     parser.add_argument("--episode-id", default=None)
+    parser.add_argument("--all", action="store_true", help="Visualize all episodes from the input file.")
     parser.add_argument("--random", type=int, default=0, help="Randomly visualize N episodes.")
     parser.add_argument("--seed", type=int, default=0)
     parser.add_argument("--real-map", action="store_true", help="Render Habitat-Sim navmesh top-down map.")
@@ -281,6 +282,8 @@ def main():
         selected = [episode for episode in episodes if episode["scene_episode_id"] == args.episode_id]
         if not selected:
             raise ValueError(f"Episode id not found: {args.episode_id}")
+    elif args.all:
+        selected = episodes
     elif args.random:
         rng = random.Random(args.seed)
         selected = rng.sample(episodes, min(args.random, len(episodes)))
