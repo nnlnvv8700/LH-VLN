@@ -441,7 +441,7 @@ agent 在有限时间内完成尽可能多任务/目标
 
 这样可以让任务更长，目标更多，也更容易体现 time-aware search 和全局取舍能力。
 
-### 11.2 Test Split 初版拼接结果
+### 11.2 Test Split 当前拼接结果
 
 当前已新增脚本：
 
@@ -449,7 +449,7 @@ agent 在有限时间内完成尽可能多任务/目标
 tools/build_scene_level_time_aware_data.py
 ```
 
-生成 test 版 scene-level 数据：
+当前按 start-floor setting 生成 test 版 scene-level 数据：
 
 ```bash
 /file_system/vepfs/algorithm/intern03/.conda/envs/lhvln/bin/python \
@@ -459,10 +459,14 @@ tools/build_scene_level_time_aware_data.py
   --max-targets 8 \
   --coverage 0.8 \
   --budget-ratios 0.5,1.0,1.5 \
-  --output data/time_aware_scene/test_episodes.jsonl
+  --min-start-floor-targets 1 \
+  --scene-root data/hm3d \
+  --benchmark-setting start_floor \
+  --output /file_system/nas/algorithm/Intern03/data/time_aware_scene/test_episodes_start_floor.jsonl \
+  --summary-csv /file_system/nas/algorithm/Intern03/data/time_aware_scene/test_summary_start_floor.csv
 ```
 
-当前 test split 统计（已在同一 scene 内对重复目标点去重）：
+当前 test split 统计（已补全 target position、按同楼层去重，并过滤掉起点楼层没有目标的 episode）：
 
 ```text
 source scenes: 124
@@ -473,16 +477,86 @@ scene-level 数据中 missing target positions: 0
 去重后 unique target points: 790
 去重删除重复 target points: 276
 可拼接 scenes（去重后至少 4 个目标点）: 94
-生成 scene-level episodes: 94
+筛掉起点楼层 0 个目标的 scenes: 6
+最终生成 scene-level episodes: 88
 每条 scene-level episode 包含目标点数: 4-8，平均 6.0
 每条 scene-level episode 涉及原始任务数: 2-5，平均 2.7
-对所有 test targets 的覆盖率: 563/1087 = 51.79%
-对可拼接 scenes 内 unique targets 的覆盖率: 563/708 = 79.52%
+对所有 test targets 的覆盖率: 526/1087 = 48.39%
+对可拼接 scenes 内 unique targets 的覆盖率: 526/708 = 74.29%
 ```
+
+当前输出文件：
+
+```text
+/file_system/nas/algorithm/Intern03/data/time_aware_scene/test_episodes_start_floor.jsonl
+/file_system/nas/algorithm/Intern03/data/time_aware_scene/test_summary_start_floor.csv
+```
+
+`test_episodes_start_floor.jsonl` 是后续跑实验的主数据，每行一个 scene-level episode。关键字段包括：
+
+```text
+episode_id
+scene / scene_path / navmesh_path
+robot
+start_position / start_yaw
+targets
+floor_heights / start_floor_id
+targets_on_start_floor / targets_off_start_floor
+time_budgets / budget_ratios
+success_distance
+benchmark_setting
+oracle_time_source / oracle_time_proxy_ordered_sum
+```
+
+`test_summary_start_floor.csv` 是快速检查用的统计表，包含每条 episode 的目标数、起点楼层目标数、off-floor 目标数、proxy oracle time 和三档 budget。
 
 去重规则是保守合并：同一真实 scene 内，只有当目标的 `name`、`region_name` 和四舍五入后的 3D `target_position` 都一致时，才认为是同一个目标点。由于 y 坐标也进入 key，因此只会合并同一楼层的重复目标。保留的 target 会记录 `duplicate_count` 和 `source_occurrences`，方便追溯它来自哪些原始 LH-VLN 任务。仍然缺少 `target_position` 的目标默认不进入 scene-level benchmark。
 
+当前 target position 补全策略：
+
+```text
+1. 优先使用原始 st_task 中对应目标的成功轨迹 endpoint。
+2. 如果 st_task 没有覆盖该目标，则按原始目标顺序读取完整 task.json 中 trial_i 的最后一个位置。
+3. 仍然找不到位置的目标不进入 scene-level benchmark。
+```
+
+补全后，V1 全量 `data/time_aware/episodes.jsonl` 的 missing target position 从 `488/2794 = 17.47%` 降到 `30/2794 = 1.07%`；当前 start-floor scene-level test 输出中 missing target position 为 0。
+
+当前 benchmark 暂时采用 `start_floor` setting：
+
+```text
+只要求每条 scene-level episode 的起点楼层至少有 1 个 target。
+所有目标仍保存在 targets 中，并标注 floor_id。
+targets_on_start_floor / targets_off_start_floor 用于区分哪些目标和起点同楼层。
+```
+
 需要注意：原始 val split 中每个 scene 的目标点较少，因此可能不适合直接构造稳定的 4-8 target scene-level validation。后续可能需要从 train/test 的 scene 中重新划分一个 scene-level val。
+
+### 11.2.1 当前可视化输出
+
+当前已有三个可视化模式：
+
+```text
+--real-map：单层 navmesh 俯视图，使用起点高度切片。
+--multi-floor：按 y 高度自动分楼层，一张图中显示多个楼层。
+--start-floor-only：只显示起点所在楼层，off-floor target 只在右侧文本中标注 hidden-off-floor。
+```
+
+主要输出目录：
+
+```text
+output/time_aware_scene/visualizations/test_navmesh_all_dedup_v2/
+output/time_aware_scene/visualizations/test_navmesh_multifloor_all/
+output/time_aware_scene/visualizations/test_navmesh_start_floor_all/
+```
+
+目前最建议人工检查使用：
+
+```text
+output/time_aware_scene/visualizations/test_navmesh_start_floor_all/
+```
+
+这个目录中有 94 张图，对应未筛掉起点楼层无目标 episode 前的 scene-level 数据。若要和 NAS 中 88 条 start-floor benchmark 完全一致，需要用 `test_episodes_start_floor.jsonl` 重新生成一版。
 
 ### 11.3 时间预算
 
