@@ -122,6 +122,44 @@ def deduplicate_scene_targets(scene_targets, position_precision):
     return unique_targets
 
 
+def cluster_floor_heights(points, threshold):
+    heights = sorted(float(point[1]) for point in points if point is not None)
+    floors = []
+    for height in heights:
+        if not floors or abs(height - floors[-1][-1]) > threshold:
+            floors.append([height])
+        else:
+            floors[-1].append(height)
+    return [sum(group) / len(group) for group in floors]
+
+
+def nearest_floor_index(point, floors):
+    if point is None or not floors:
+        return None
+    height = float(point[1])
+    return min(range(len(floors)), key=lambda index: abs(height - floors[index]))
+
+
+def count_start_floor_targets(start_position, targets, floor_threshold):
+    points = []
+    if start_position is not None:
+        points.append(start_position)
+    points.extend(
+        target["target_position"]
+        for target in targets
+        if target.get("target_position") is not None
+    )
+    floors = cluster_floor_heights(points, floor_threshold)
+    start_floor = nearest_floor_index(start_position, floors)
+    if start_floor is None:
+        return 0
+    return sum(
+        nearest_floor_index(target.get("target_position"), floors) == start_floor
+        for target in targets
+        if target.get("target_position") is not None
+    )
+
+
 def choose_scene_targets(
     records,
     min_targets,
@@ -263,6 +301,18 @@ def main():
         default=0.25,
         help="Position grid size in meters for duplicate target matching.",
     )
+    parser.add_argument(
+        "--min-start-floor-targets",
+        type=int,
+        default=0,
+        help="Skip scene episodes with fewer than this many targets on the start floor.",
+    )
+    parser.add_argument(
+        "--floor-threshold",
+        type=float,
+        default=0.75,
+        help="Y-distance threshold in meters for grouping floors.",
+    )
     parser.add_argument("--budget-ratios", default="0.5,1.0,1.5")
     parser.add_argument(
         "--oracle-time-source",
@@ -282,6 +332,7 @@ def main():
 
     scene_episodes = []
     skipped = {}
+    skipped_no_start_floor_targets = {}
     unique_targets_by_scene = {}
     raw_targets_by_scene = {}
     for scene, scene_records in sorted(by_scene.items()):
@@ -308,6 +359,14 @@ def main():
         )
         if not selected_targets:
             skipped[scene] = len(scene_records)
+            continue
+        start_floor_target_count = count_start_floor_targets(
+            scene_records[0].get("start_position"),
+            selected_targets,
+            args.floor_threshold,
+        )
+        if start_floor_target_count < args.min_start_floor_targets:
+            skipped_no_start_floor_targets[scene] = start_floor_target_count
             continue
         scene_episodes.append(
             build_scene_episode(
@@ -369,6 +428,7 @@ def main():
     print(f"source targets per scene: {describe(source_target_counts)}")
     print(f"stitched episodes: {len(scene_episodes)}")
     print(f"skipped scenes (<{args.min_targets} targets): {len(skipped)}")
+    print(f"skipped scenes (<{args.min_start_floor_targets} start-floor targets): {len(skipped_no_start_floor_targets)}")
     print(f"covered source targets among all source targets: {covered_targets}/{available_targets} ({covered_targets / available_targets:.2%})")
     print(f"covered source targets among eligible scenes: {covered_targets}/{eligible_targets} ({covered_targets / eligible_targets:.2%})")
     print(f"source tasks per stitched episode: {describe(task_counts)}")
