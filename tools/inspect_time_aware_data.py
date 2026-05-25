@@ -74,6 +74,54 @@ def load_trial_positions(task_dir, trajectory_path):
     return trial.get("pos")
 
 
+def load_all_trial_endpoints(task_dir, trajectory_path):
+    task_path = task_dir / trajectory_path / "task.json"
+    if not task_path.exists():
+        return {}
+    with task_path.open("r", encoding="utf-8") as handle:
+        task_data = json.load(handle)
+    endpoints = {}
+    for trial_key, trial in (task_data.get("trial") or {}).items():
+        if not trial_key.startswith("trial_"):
+            continue
+        try:
+            trial_index = int(trial_key.split("_", 1)[1])
+        except ValueError:
+            continue
+        positions = trial.get("pos") or []
+        if positions:
+            endpoints[trial_index] = positions[-1]
+    return endpoints
+
+
+def ordered_trial_position_lookup(episode, task_dir):
+    st_tasks = episode.get("st_task") or []
+    trajectory_path = None
+    for step_task in st_tasks:
+        if step_task.get("trajectory path"):
+            trajectory_path = step_task.get("trajectory path")
+            break
+    if trajectory_path is None:
+        return {}
+
+    endpoints = load_all_trial_endpoints(task_dir, trajectory_path)
+    if not endpoints:
+        return {}
+
+    lookup = {}
+    for target_index, item in enumerate(episode.get("lh_task", {}).get("Object") or []):
+        if not isinstance(item, (list, tuple)) or len(item) < 2:
+            continue
+        target_name = item[0]
+        region_id, _ = parse_region(item[1])
+        if region_id is None:
+            continue
+        region_number = region_id.replace("Region", "").strip()
+        if target_index in endpoints:
+            lookup[(target_name, str(region_number))] = endpoints[target_index]
+    return lookup
+
+
 def target_position_lookup(episode, task_dir):
     lookup = {}
     for step_task in episode.get("st_task") or []:
@@ -90,6 +138,8 @@ def target_position_lookup(episode, task_dir):
 
         for target, region in zip(step_task.get("target", []), step_task.get("Region", [])):
             lookup[(target, str(region))] = end_position
+    for key, position in ordered_trial_position_lookup(episode, task_dir).items():
+        lookup.setdefault(key, position)
     return lookup
 
 

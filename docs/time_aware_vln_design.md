@@ -468,17 +468,19 @@ tools/build_scene_level_time_aware_data.py
 source scenes: 124
 source tasks: 403
 source targets: 1087
-去重后 unique target points: 799
-去重删除重复 target points: 288
+补全轨迹终点后 source targets with positions: 1066
+scene-level 数据中 missing target positions: 0
+去重后 unique target points: 790
+去重删除重复 target points: 276
 可拼接 scenes（去重后至少 4 个目标点）: 94
 生成 scene-level episodes: 94
 每条 scene-level episode 包含目标点数: 4-8，平均 6.0
-每条 scene-level episode 涉及原始任务数: 2-5，平均 2.8
-对所有 test targets 的覆盖率: 568/1087 = 52.25%
-对可拼接 scenes 内 unique targets 的覆盖率: 568/717 = 79.22%
+每条 scene-level episode 涉及原始任务数: 2-5，平均 2.7
+对所有 test targets 的覆盖率: 563/1087 = 51.79%
+对可拼接 scenes 内 unique targets 的覆盖率: 563/708 = 79.52%
 ```
 
-去重规则是保守合并：同一真实 scene 内，只有当目标的 `name`、`region_name` 和四舍五入后的 `target_position` 都一致时，才认为是同一个目标点。保留的 target 会记录 `duplicate_count` 和 `source_occurrences`，方便追溯它来自哪些原始 LH-VLN 任务。
+去重规则是保守合并：同一真实 scene 内，只有当目标的 `name`、`region_name` 和四舍五入后的 3D `target_position` 都一致时，才认为是同一个目标点。由于 y 坐标也进入 key，因此只会合并同一楼层的重复目标。保留的 target 会记录 `duplicate_count` 和 `source_occurrences`，方便追溯它来自哪些原始 LH-VLN 任务。仍然缺少 `target_position` 的目标默认不进入 scene-level benchmark。
 
 需要注意：原始 val split 中每个 scene 的目标点较少，因此可能不适合直接构造稳定的 4-8 target scene-level validation。后续可能需要从 train/test 的 scene 中重新划分一个 scene-level val。
 

@@ -68,10 +68,19 @@ def normalize_text(value):
 
 
 def target_dedup_key(target, position_precision):
+    rounded_position = round_position(target.get("target_position"), position_precision)
+    if rounded_position is None:
+        # Unknown-position targets are not safe to merge: two objects with the
+        # same text label may live on different floors or in different places.
+        return (
+            "missing-position",
+            target.get("source_task_id"),
+            target.get("source_target_index"),
+        )
     return (
         normalize_text(target.get("name")),
         normalize_text(target.get("region_name") or target.get("region")),
-        round_position(target.get("target_position"), position_precision),
+        rounded_position,
     )
 
 
@@ -79,8 +88,10 @@ def deduplicate_scene_targets(scene_targets, position_precision):
     """Merge repeated target points within the same scene.
 
     A target is considered duplicated only when it has the same object name,
-    same region label, and nearly identical 3D target position. The first
+    same region label, and nearly identical 3D target position, including the
+    y coordinate. This means targets are merged only on the same floor. The first
     occurrence is kept, and all source occurrences are recorded for traceability.
+    Targets without positions are kept separate.
     """
     unique_targets = []
     by_key = {}
@@ -95,9 +106,9 @@ def deduplicate_scene_targets(scene_targets, position_precision):
         if key not in by_key:
             item = deepcopy(target)
             item["dedup_key"] = {
-                "name": key[0],
-                "region": key[1],
-                "rounded_position": key[2],
+                "name": normalize_text(target.get("name")),
+                "region": normalize_text(target.get("region_name") or target.get("region")),
+                "rounded_position": round_position(target.get("target_position"), position_precision),
                 "position_precision": position_precision,
             }
             item["source_occurrences"] = [occurrence]
@@ -111,13 +122,26 @@ def deduplicate_scene_targets(scene_targets, position_precision):
     return unique_targets
 
 
-def choose_scene_targets(records, min_targets, max_targets, coverage, dedup, position_precision):
+def choose_scene_targets(
+    records,
+    min_targets,
+    max_targets,
+    coverage,
+    dedup,
+    position_precision,
+    include_missing_targets,
+):
     """Choose 4-8 target points for a scene.
 
     The goal is to cover about `coverage` of available targets while staying in the
     requested 4-8 target range. Scenes with fewer than min_targets are skipped.
     """
     raw_scene_targets = flatten_scene_targets(records)
+    if not include_missing_targets:
+        raw_scene_targets = [
+            target for target in raw_scene_targets
+            if target.get("target_position") is not None
+        ]
     scene_targets = (
         deduplicate_scene_targets(raw_scene_targets, position_precision)
         if dedup
@@ -229,6 +253,11 @@ def main():
         help="Disable target-point deduplication inside each scene.",
     )
     parser.add_argument(
+        "--include-missing-targets",
+        action="store_true",
+        help="Keep targets without target_position. By default they are filtered out.",
+    )
+    parser.add_argument(
         "--dedup-position-precision",
         type=float,
         default=0.25,
@@ -257,6 +286,11 @@ def main():
     raw_targets_by_scene = {}
     for scene, scene_records in sorted(by_scene.items()):
         raw_targets = flatten_scene_targets(scene_records)
+        if not args.include_missing_targets:
+            raw_targets = [
+                target for target in raw_targets
+                if target.get("target_position") is not None
+            ]
         unique_targets = deduplicate_scene_targets(
             raw_targets,
             args.dedup_position_precision,
@@ -270,6 +304,7 @@ def main():
             coverage=args.coverage,
             dedup=not args.no_dedup,
             position_precision=args.dedup_position_precision,
+            include_missing_targets=args.include_missing_targets,
         )
         if not selected_targets:
             skipped[scene] = len(scene_records)
@@ -299,6 +334,11 @@ def main():
         for items in by_scene.values()
         for task in items
     )
+    available_positioned_targets = sum(
+        sum(target.get("target_position") is not None for target in task.get("targets", []))
+        for items in by_scene.values()
+        for task in items
+    )
     available_unique_targets = sum(unique_targets_by_scene.values())
     eligible_targets = sum(
         unique_targets_by_scene[scene] if not args.no_dedup else raw_targets_by_scene[scene]
@@ -319,8 +359,11 @@ def main():
     print(f"source tasks: {available_tasks}")
     print(f"source tasks per scene: {describe(source_scene_counts)}")
     print(f"source targets: {available_targets}")
+    print(f"source targets with positions: {available_positioned_targets}")
     print(f"unique target points after dedup: {available_unique_targets}")
-    print(f"duplicate target points removed: {available_targets - available_unique_targets}")
+    print(f"include missing targets: {args.include_missing_targets}")
+    dedup_source_targets = available_targets if args.include_missing_targets else available_positioned_targets
+    print(f"duplicate target points removed: {dedup_source_targets - available_unique_targets}")
     print(f"target deduplication: {'off' if args.no_dedup else 'on'}")
     print(f"dedup position precision: {args.dedup_position_precision} m")
     print(f"source targets per scene: {describe(source_target_counts)}")
