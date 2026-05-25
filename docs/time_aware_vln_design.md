@@ -415,7 +415,132 @@ LLM 选出来的目标顺序是否比 nearest greedy 更合理，
    - LLM planner with time prompt
    - 后续动作级 VLN model with time prompt
 
-## 11. 目前还不确定的问题
+## 11. V2: Scene-Level Time-Aware VLN
+
+根据老师意见，下一阶段不再只用原始 LH-VLN 单条 episode，而是基于同一个 scene 拼接多个任务，构造更长、更接近搜索的 scene-level time-aware benchmark。
+
+### 11.1 核心变化
+
+V1 当前设定：
+
+```text
+一条 LH-VLN episode
+通常 2-4 个 targets
+目标位置已知
+研究目标顺序选择
+```
+
+V2 目标设定：
+
+```text
+一个 HM3D scene
+拼接 4-8 条原始 LH-VLN tasks
+形成一个更长的 scene-level episode
+agent 在有限时间内完成尽可能多任务/目标
+```
+
+这样可以让任务更长，目标更多，也更容易体现 time-aware search 和全局取舍能力。
+
+### 11.2 Test Split 初版拼接结果
+
+当前已新增脚本：
+
+```bash
+tools/build_scene_level_time_aware_data.py
+```
+
+生成 test 版 scene-level 数据：
+
+```bash
+/file_system/vepfs/algorithm/intern03/.conda/envs/lhvln/bin/python \
+  tools/build_scene_level_time_aware_data.py \
+  --split test \
+  --min-tasks 4 \
+  --max-tasks 8 \
+  --coverage 0.8 \
+  --budget-ratios 0.5,1.0,1.5 \
+  --output data/time_aware_scene/test_episodes.jsonl
+```
+
+当前 test split 统计：
+
+```text
+source scenes: 124
+source tasks: 403
+可拼接 scenes（至少 4 个任务）: 50
+生成 scene-level episodes: 50
+每条 scene-level episode 包含任务数: 4-8，平均 4.4
+每条 scene-level episode 包含 targets 数: 8-23，平均 12.0
+对所有 test tasks 的覆盖率: 222/403 = 55.09%
+对可拼接 scenes 内 tasks 的覆盖率: 222/251 = 88.45%
+```
+
+需要注意：原始 val split 中每个 scene 只有 1-2 个任务，因此不适合直接构造 4-8 task 的 scene-level validation。后续可能需要从 train/test 的 scene 中重新划分一个 scene-level val。
+
+### 11.3 时间预算
+
+老师建议横坐标改为：
+
+```text
+0.5, 1.0, 1.5 × 每个 scene-level episode 的枚举最优时间
+```
+
+当前 `build_scene_level_time_aware_data.py` 先使用：
+
+```text
+oracle_time_proxy_ordered_sum = 被拼接任务的原始 ordered oracle steps 之和
+```
+
+作为临时 proxy，并生成：
+
+```text
+0.5 × proxy time
+1.0 × proxy time
+1.5 × proxy time
+```
+
+这只是数据构造 smoke test。后续需要替换为真正的 scene-level oracle time：
+
+```text
+对拼接任务/目标做枚举或动态规划，
+用 Habitat follower 实际执行，
+得到完成全部可完成任务/目标的最优时间。
+```
+
+### 11.4 Prompt 设计
+
+老师建议后续 prompt 不直接告诉 LLM 精确 step 数，而是实时发送模糊时间压力描述。
+
+也就是说，系统内部仍然使用精确 step budget 评测，但模型看到的是：
+
+```text
+time is very limited
+time is tight
+time is moderate
+time is sufficient
+```
+
+而不是：
+
+```text
+you have 80 steps remaining
+```
+
+这样更接近自然语言 time-awareness，也能避免模型只机械利用数字。
+
+### 11.5 方法划分
+
+后续主体可以分成三类：
+
+```text
+LLM: 文本 planner，例如 DeepSeek/GPT，输入任务列表、历史、模糊时间压力。
+VLM: 图像 + 文本模型，输入当前 observation、历史和模糊时间压力。
+SOTA: NavGPT-2 / NaVid / Uni-NaVid 等现有 VLN 方法。
+```
+
+如果完整 VLN 效果不好，可以退一步把问题定义为 time-aware search strategy，比对不同搜索策略在预算下的 completion curve。
+
+## 12. 目前还不确定的问题
 
 需要进一步确认：
 
