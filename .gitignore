@@ -1,1 +1,10 @@
 .DS_Store
+data/
+output/
+run/
+save_checkpoints/
+*.pth
+*.pt
+*.safetensors
+__pycache__/
+*.pyc

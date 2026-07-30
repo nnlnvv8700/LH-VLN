@@ -31,6 +31,19 @@ class SceneSimulator:
 
         # init simulator
         self.sim_settings = make_setting(self.args, self.scene, self.robot)
+        self.no_render = getattr(self.args, "no_render", False)
+        if self.no_render:
+            for sensor_key in (
+                "color_sensor_f",
+                "color_sensor_l",
+                "color_sensor_r",
+                "color_sensor_3rd",
+                "depth_sensor_f",
+                "depth_sensor_l",
+                "depth_sensor_r",
+                "semantic_sensor",
+            ):
+                self.sim_settings[sensor_key] = False
         self.cfg = make_cfg(self.sim_settings)
         self.sim = habitat_sim.Simulator(self.cfg)
 
@@ -58,7 +71,7 @@ class SceneSimulator:
         )
 
         # init obs
-        self.observations = self.sim.step("move_forward")
+        self.observations = {} if self.no_render else self.sim.step("move_forward")
 
         # metrics
         self.step = -1
@@ -373,4 +386,3 @@ class SceneSimulator:
     def close(self):
         """Close the simulator."""
         self.sim.close()
-

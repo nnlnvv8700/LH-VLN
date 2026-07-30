@@ -1,3 +1,4 @@
+# 用途：LH-VLN 任务、轨迹或子任务生成脚本。
 from torch.utils.data import Dataset
 from functools import reduce
 import os

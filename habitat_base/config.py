@@ -1,6 +1,7 @@
 import habitat_sim
 import math
 import magnum as mn
+import os
 
 def make_setting(args, scene_file, robot):
     # test_scene = "102343992"
@@ -41,7 +42,7 @@ def make_setting(args, scene_file, robot):
 
 def make_cfg(settings):
     sim_cfg = habitat_sim.SimulatorConfiguration()
-    sim_cfg.gpu_device_id = 1
+    sim_cfg.gpu_device_id = int(os.environ.get("HABITAT_GPU_DEVICE_ID", 0))
     sim_cfg.scene_id = settings["scene"]
     sim_cfg.enable_physics = settings["enable_physics"]
 

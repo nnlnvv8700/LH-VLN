@@ -1,0 +1,42 @@
+Path:
+  scene: "data/hm3d/"
+  scene_dataset: "data/hm3d/hm3d_annotated_basis.scene_dataset_config.json"
+
+  episode_data: "data/episode_task"
+  task_data: "data/task"
+  step_task_data: "data/step_task"
+  train_batch: ['/batch_1', '/batch_2', '/batch_3', '/batch_4', '/batch_5']
+  val_batch: ['/batch_6']
+  test_batch: ['/batch_7', '/batch_8']
+  split_by_scene: True
+
+  save_checkpoints: "save_checkpoints"
+
+  tensorboard_path: "run"
+  output_dir: "output/time_aware"
+
+TimeAware:
+  unordered_targets: True
+  time_unit: "step"
+  budget_ratios: [0.5, 0.75, 1.0, 1.25]
+  default_target_value: 1.0
+  stop_completes_nearest_target: True
+
+Train:
+  mode: 'test'
+  tensorboard: False
+  best_checkpoint: null
+  load_checkpoint: False
+  save_ckpt_per_epochs: 10
+
+  batch_size: 1
+  num_epochs: 20
+  ignoreid: -100
+  max_step: 500
+  gradient_accumulation_step: 2
+  num_warmup_steps: 1000
+
+  success_dis: 1
+
+Model:
+  model_name: "Random"
