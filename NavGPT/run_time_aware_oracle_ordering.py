@@ -1,4 +1,4 @@
-# 用途：NavGPT-style Time-Aware VLN 脚本。
+# 用途：运行使用预计算 oracle 最优目标访问顺序的 follower 上限基线，供与真实视觉导航结果区分比较。
 #!/usr/bin/env python3
 """Run an oracle target-ordering baseline for time-aware LH-VLN tasks."""
 

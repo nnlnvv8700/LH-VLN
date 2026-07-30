@@ -1,4 +1,4 @@
-# 用途：NavGPT-style Time-Aware VLN 脚本。
+# 用途：将 NavGPT-style 视觉文本提示发送给 DeepSeek，并解析其输出的低层离散动作。
 #!/usr/bin/env python3
 """DeepSeek action selector for the NavGPT-Habitat adapter.
 

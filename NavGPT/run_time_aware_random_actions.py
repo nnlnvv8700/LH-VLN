@@ -1,4 +1,4 @@
-# 用途：NavGPT-style Time-Aware VLN 脚本。
+# 用途：在 Habitat 中按指定概率执行随机前进/转向原子动作，作为无视觉决策的时间预算基线。
 #!/usr/bin/env python3
 """Run a primitive random-action baseline for scene-level Time-Aware VLN.
 

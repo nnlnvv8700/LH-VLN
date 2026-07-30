@@ -1,4 +1,4 @@
-# 用途：NavGPT-style Time-Aware VLN 脚本。
+# 用途：提供通用 VLM 局部候选视点选择接口，负责构造多视图提示、调用外部模型并解析候选索引。
 #!/usr/bin/env python3
 """OpenAI-compatible multimodal selector for waypoint candidates.
 

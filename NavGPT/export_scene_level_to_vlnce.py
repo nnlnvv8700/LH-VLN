@@ -1,4 +1,4 @@
-# 用途：NavGPT-style Time-Aware VLN 脚本。
+# 用途：将 scene-level 多目标 episode 导出为 VLN-CE 兼容的数据记录与任务文本格式。
 #!/usr/bin/env python3
 """Export scene-level Time-Aware VLN episodes to a VLN-CE/NaVid-style file.
 

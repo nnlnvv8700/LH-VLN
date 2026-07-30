@@ -1,4 +1,4 @@
-# 用途：NavGPT-style Time-Aware VLN 脚本。
+# 用途：用 Habitat GreedyGeodesicFollower 估计目标间动作代价并枚举顺序，写入 oracle 最优时间与三档 budget。
 #!/usr/bin/env python3
 """Compute scene-level oracle time budgets by enumerating target orders.
 

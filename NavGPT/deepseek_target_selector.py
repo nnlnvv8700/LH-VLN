@@ -1,4 +1,4 @@
-# 用途：NavGPT-style Time-Aware VLN 脚本。
+# 用途：将未完成目标及时间提示发送给 DeepSeek，解析其选择的下一高层目标索引。
 #!/usr/bin/env python3
 """Select the next target index with DeepSeek Chat Completions.
 

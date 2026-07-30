@@ -1,4 +1,4 @@
-# 用途：NavGPT-style Time-Aware VLN 脚本。
+# 用途：从原始导航任务构建同楼层、空间去重后的 scene-level 多目标 Time-Aware VLN episode 数据集。
 #!/usr/bin/env python3
 """Build scene-level time-aware tasks by stitching LH-VLN target points.
 

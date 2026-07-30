@@ -1,4 +1,4 @@
-# 用途：NavGPT-style Time-Aware VLN 脚本。
+# 用途：为已保存的候选视点 RGB 图像调用 RAM 或 mock 标注器，生成视觉文本描述缓存。
 #!/usr/bin/env python3
 """Build cached visual text for NavGPT-style waypoint candidate images.
 

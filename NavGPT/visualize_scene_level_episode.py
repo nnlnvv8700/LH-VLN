@@ -1,4 +1,4 @@
-# 用途：NavGPT-style Time-Aware VLN 脚本。
+# 用途：可视化 scene-level episode 的起点、合并后目标、任务文本和可选 Habitat navmesh 楼层地图。
 #!/usr/bin/env python3
 """Visualize scene-level time-aware episodes.
 

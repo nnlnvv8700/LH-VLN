@@ -1,4 +1,4 @@
-# 用途：NavGPT-style Time-Aware VLN 脚本。
+# 用途：运行 NavGPT-style 文本视觉低层动作 agent，并在真实 Habitat 环境内执行和自动完成多目标。
 #!/usr/bin/env python3
 """Run a NavGPT-style action-level agent on scene-level Time-Aware VLN.
 

@@ -1,4 +1,4 @@
-# 用途：NavGPT-style Time-Aware VLN 脚本。
+# 用途：提供可复现的随机局部候选视点选择器，作为视觉候选决策的对照基线。
 #!/usr/bin/env python3
 """Random selector for NavGPT-style waypoint candidates.
 

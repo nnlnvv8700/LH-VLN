@@ -1,4 +1,4 @@
-# 用途：NavGPT-style Time-Aware VLN 脚本。
+# 用途：运行 LLM 高层目标调度与 Habitat oracle follower 的时间感知基线，评测目标顺序选择。
 #!/usr/bin/env python3
 """Run budget-conditioned unordered long-horizon planning with an oracle follower.
 

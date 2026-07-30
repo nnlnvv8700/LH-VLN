@@ -1,4 +1,4 @@
-# 用途：NavGPT-style Time-Aware VLN 脚本。
+# 用途：运行 Uni-NaVid/NaVid RGB 视觉导航模型，并用 Habitat 环境侧规则评测多目标与时间预算。
 #!/usr/bin/env python3
 """Run NaVid/Uni-NaVid inside the Time-Aware VLN multi-target evaluator.
 

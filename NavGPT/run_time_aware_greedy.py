@@ -1,4 +1,4 @@
-# 用途：NavGPT-style Time-Aware VLN 脚本。
+# 用途：运行按当前最近未完成目标贪心选择的 Habitat oracle-follower 时间预算基线。
 #!/usr/bin/env python3
 """Run a nearest-target greedy baseline for time-aware LH-VLN tasks."""
 

@@ -1,4 +1,4 @@
-# 用途：NavGPT-style Time-Aware VLN 脚本。
+# 用途：将局部候选视点的视觉文本、任务和历史发送给 DeepSeek，解析其选择的候选点索引。
 #!/usr/bin/env python3
 """DeepSeek selector for NavGPT-style Habitat waypoint candidates.
 

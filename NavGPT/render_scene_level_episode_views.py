@@ -1,4 +1,4 @@
-# 用途：NavGPT-style Time-Aware VLN 脚本。
+# 用途：在 Habitat/HM3D 中渲染指定 scene-level episode 的起点、目标附近及候选视角 RGB 和鸟瞰图。
 #!/usr/bin/env python3
 """Render real RGB views for a scene-level time-aware episode.
 

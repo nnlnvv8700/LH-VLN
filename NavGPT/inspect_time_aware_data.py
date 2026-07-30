@@ -1,4 +1,4 @@
-# 用途：NavGPT-style Time-Aware VLN 脚本。
+# 用途：检查 Time-Aware VLN episode 数据的字段、目标规模、场景分布和预算统计，并可导出标准化 JSONL。
 #!/usr/bin/env python3
 """Inspect LHPR-VLN episodes and optionally export time-aware task records."""
 

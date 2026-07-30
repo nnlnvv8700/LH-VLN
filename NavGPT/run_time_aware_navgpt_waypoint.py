@@ -1,4 +1,4 @@
-# 用途：NavGPT-style Time-Aware VLN 脚本。
+# 用途：运行 NavGPT-style 局部候选视点选择 agent，由 Habitat follower 真实移动并自动判定多目标完成。
 #!/usr/bin/env python3
 """Run a NavGPT-style waypoint agent on scene-level Time-Aware VLN.
 
