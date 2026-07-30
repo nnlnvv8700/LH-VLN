@@ -73,7 +73,7 @@ The datasets actually used are of two types: the VLA dataset and the episode dat
 - **VLA Dataset:** This is the data within the downloaded `task` folder, which includes all tasks and their optimal navigation trajectories. Because it contains observations and poses at every step of the navigation trajectory, it does not need to be actively deployed in the simulator. In the provided code, when the `episode_data` parameter is set to `None`, the method for constructing a DataLoader that deploys the VLA dataset online in the simulator is called.
 - **Episode Dataset:** This is the data within the downloaded `episode_task` folder, which contains the necessary information to construct tasks online within the simulator. An episode includes one `"lh_task"` and one `"st_task"`. The `"lh_task"` contains the main LH-VLN task information, while the `"st_task"` contains information for one or more step-by-step navigation tasks that are on the same trajectory as the `"lh_task"`. They are treated as independent tasks.
 
-In the provided code, the DataLoader returns one LH-VLN task configuration and a list contains one or more step-by-step navigation task configurations at each iteration; they are independent of each other. For details, please see `train.py` and `utils/dataset.py`.
+In the original training code, the DataLoader returned one LH-VLN task configuration and a list containing one or more step-by-step navigation task configurations at each iteration; they were independent of each other. The legacy training entry points are not included in this evaluation-focused repository; the dataset definition remains in `utils/dataset.py`.
 
 **Partial Code Description:**
 
