@@ -36,10 +36,20 @@ def load_records(path, split, limit):
     return records
 
 
+def record_id(record):
+    return record.get("task_id") or record.get("episode_id") or record.get("scene_episode_id")
+
+
+def record_instruction(record):
+    return record.get("instruction") or record.get("stitched_instruction") or "\n".join(
+        item for item in record.get("instructions", []) if item
+    )
+
+
 def record_to_config(record):
     targets = record["targets"]
     return {
-        "Task instruction": record["instruction"],
+        "Task instruction": record_instruction(record),
         "Scene": record["scene"],
         "Robot": record["robot"],
         "Object": [target["name"] for target in targets],
@@ -47,7 +57,7 @@ def record_to_config(record):
         "Target positions": [target.get("target_position") for target in targets],
         "Start pos": record.get("start_position"),
         "Start yaw": record.get("start_yaw"),
-        "Batch": "/" + record["batch"],
+        "Batch": "/" + (record.get("batch") or record_id(record).split("/", 1)[0]),
     }
 
 
@@ -55,7 +65,7 @@ def run_episode(args, record):
     ratio_key = str(args.budget_ratio)
     time_budget = record["time_budgets"].get(ratio_key)
     if time_budget is None:
-        raise ValueError(f"Missing budget ratio {ratio_key} for {record['task_id']}")
+        raise ValueError(f"Missing budget ratio {ratio_key} for {record_id(record)}")
 
     config = record_to_config(record)
     target_values = [target.get("value", 1.0) for target in record["targets"]]
@@ -81,7 +91,7 @@ def run_episode(args, record):
         result = sim.return_results()
     finally:
         sim.close()
-    result["task_id"] = record["task_id"]
+    result["task_id"] = record_id(record)
     result["split"] = record["split"]
     result["scene"] = record["scene"]
     result["robot"] = record["robot"]
@@ -140,7 +150,7 @@ def write_summary_csv(path, rows):
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--episodes", default="data/time_aware/episodes.jsonl")
-    parser.add_argument("--split", default="val", choices=["train", "val", "test"])
+    parser.add_argument("--split", default="val", choices=["train", "val", "test", "all"])
     parser.add_argument("--limit", type=int, default=5)
     parser.add_argument("--budget-ratio", type=float, default=None)
     parser.add_argument(
@@ -173,7 +183,7 @@ def main():
         results = []
         print(f"\n===== budget_ratio={ratio} split={args.split} episodes={len(records)} =====")
         for index, record in enumerate(records):
-            print(f"===== [{index + 1}/{len(records)}] {record['task_id']} =====")
+            print(f"===== [{index + 1}/{len(records)}] {record_id(record)} =====")
             if args.quiet:
                 with contextlib.redirect_stdout(io.StringIO()):
                     results.append(run_episode(args, record))

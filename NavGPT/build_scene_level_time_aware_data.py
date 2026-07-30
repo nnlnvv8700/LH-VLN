@@ -123,6 +123,98 @@ def deduplicate_scene_targets(scene_targets, position_precision):
     return unique_targets
 
 
+def source_occurrence(target):
+    return {
+        "source_task_id": target.get("source_task_id"),
+        "source_target_index": target.get("source_target_index"),
+        "source_task_instruction": target.get("source_task_instruction"),
+        "source_ordered_gt_step": target.get("source_ordered_gt_step"),
+        "name": target.get("name"),
+        "region_name": target.get("region_name") or target.get("region"),
+        "target_position": target.get("target_position"),
+    }
+
+
+def xz_distance(first, second):
+    return math.sqrt(
+        (float(first[0]) - float(second[0])) ** 2
+        + (float(first[2]) - float(second[2])) ** 2
+    )
+
+
+def min_non_null(values, default=None):
+    filtered = [value for value in values if value is not None]
+    if not filtered:
+        return default
+    return min(filtered)
+
+
+def deduplicate_spatial_targets(scene_targets, merge_distance, floor_threshold):
+    """Merge nearby/overlapping target points into one spatial waypoint.
+
+    The representative target_position is kept from a real source target instead
+    of using the centroid, because centroids can fall outside the navmesh. The
+    centroid is still recorded as metadata for visualization/debugging.
+    """
+    clusters = []
+    for target in scene_targets:
+        position = target.get("target_position")
+        if position is None:
+            item = deepcopy(target)
+            item["target_type"] = "spatial_waypoint"
+            item["source_occurrences"] = [source_occurrence(target)]
+            item["duplicate_count"] = 1
+            clusters.append(item)
+            continue
+
+        matched = None
+        for cluster in clusters:
+            cluster_position = cluster.get("target_position")
+            if cluster_position is None:
+                continue
+            if abs(float(position[1]) - float(cluster_position[1])) > floor_threshold:
+                continue
+            if xz_distance(position, cluster_position) <= merge_distance:
+                matched = cluster
+                break
+
+        occurrence = source_occurrence(target)
+        if matched is None:
+            item = deepcopy(target)
+            item["target_type"] = "spatial_waypoint"
+            item["spatial_merge_distance"] = merge_distance
+            item["source_occurrences"] = [occurrence]
+            item["duplicate_count"] = 1
+            item["cluster_center"] = list(position)
+            clusters.append(item)
+        else:
+            matched["source_occurrences"].append(occurrence)
+            matched["duplicate_count"] += 1
+            positions = [
+                occurrence["target_position"]
+                for occurrence in matched["source_occurrences"]
+                if occurrence.get("target_position") is not None
+            ]
+            matched["cluster_center"] = [
+                sum(float(position[index]) for position in positions) / len(positions)
+                for index in range(3)
+            ]
+            matched["source_ordered_gt_step"] = min_non_null(
+                occurrence.get("source_ordered_gt_step")
+                for occurrence in matched["source_occurrences"]
+            )
+    for index, cluster in enumerate(clusters):
+        cluster["spatial_cluster_id"] = index
+        cluster["dedup_key"] = {
+            "mode": "spatial",
+            "representative_position": cluster.get("target_position"),
+            "cluster_center": cluster.get("cluster_center"),
+            "merge_distance": merge_distance,
+            "floor_threshold": floor_threshold,
+        }
+    return clusters
+
+
 def cluster_floor_heights(points, threshold):
     heights = sorted(float(point[1]) for point in points if point is not None)
     floors = []
@@ -159,6 +251,82 @@ def count_start_floor_targets(start_position, targets, floor_threshold):
         for target in targets
         if target.get("target_position") is not None
     )
+
+
+def floor_groups(scene_records, targets, floor_threshold):
+    points = []
+    for record in scene_records:
+        if record.get("start_position") is not None:
+            points.append(record["start_position"])
+    points.extend(
+        target["target_position"]
+        for target in targets
+        if target.get("target_position") is not None
+    )
+    floors = cluster_floor_heights(points, floor_threshold)
+    targets_by_floor = defaultdict(list)
+    for target in targets:
+        floor_id = nearest_floor_index(target.get("target_position"), floors)
+        targets_by_floor[floor_id].append(target)
+    starts_by_floor = defaultdict(list)
+    for record in sorted(scene_records, key=task_sort_key):
+        floor_id = nearest_floor_index(record.get("start_position"), floors)
+        starts_by_floor[floor_id].append(record)
+    return floors, targets_by_floor, starts_by_floor
+
+
+def deduplicate_targets(targets, mode, position_precision, spatial_merge_distance, floor_threshold):
+    if mode == "none":
+        scene_targets = [deepcopy(target) for target in targets]
+        for target in scene_targets:
+            target["source_occurrences"] = [source_occurrence(target)]
+            target["duplicate_count"] = 1
+        return scene_targets
+    if mode == "semantic":
+        return deduplicate_scene_targets(targets, position_precision)
+    if mode == "spatial":
+        return deduplicate_spatial_targets(targets, spatial_merge_distance, floor_threshold)
+    raise ValueError(f"Unknown dedup mode: {mode}")
+
+
+def choose_floor_id(
+    floors,
+    targets_by_floor,
+    starts_by_floor,
+    floor_selection,
+    dedup_mode,
+    position_precision,
+    spatial_merge_distance,
+    floor_threshold,
+):
+    candidate_floor_ids = sorted(
+        floor_id for floor_id in targets_by_floor
+        if floor_id is not None
+    )
+    if not candidate_floor_ids:
+        return None
+    if floor_selection in {"start", "best_with_start"}:
+        candidate_floor_ids = [
+            floor_id for floor_id in candidate_floor_ids
+            if starts_by_floor.get(floor_id)
+        ]
+    if not candidate_floor_ids:
+        return None
+    if floor_selection == "start":
+        return candidate_floor_ids[0]
+
+    def score(floor_id):
+        unique_targets = deduplicate_targets(
+            targets_by_floor[floor_id],
+            dedup_mode,
+            position_precision,
+            spatial_merge_distance,
+            floor_threshold,
+        )
+        has_start = 1 if starts_by_floor.get(floor_id) else 0
+        return len(unique_targets), has_start, -floor_id
+
+    return max(candidate_floor_ids, key=score)
 
 
 def scene_split(scene):
@@ -209,6 +377,7 @@ def annotate_floor_metadata(start_position, targets, floor_threshold):
         "targets_on_start_floor": targets_on_start_floor,
         "targets_off_start_floor": targets_off_start_floor,
         "num_start_floor_targets": len(targets_on_start_floor),
+        "num_off_start_floor_targets": len(targets_off_start_floor),
     }
 
 
@@ -217,9 +386,12 @@ def choose_scene_targets(
     min_targets,
     max_targets,
     coverage,
-    dedup,
+    dedup_mode,
     position_precision,
     include_missing_targets,
+    spatial_merge_distance,
+    floor_threshold,
+    floor_selection,
 ):
     """Choose 4-8 target points for a scene.
 
@@ -232,19 +404,62 @@ def choose_scene_targets(
             target for target in raw_scene_targets
             if target.get("target_position") is not None
         ]
-    scene_targets = (
-        deduplicate_scene_targets(raw_scene_targets, position_precision)
-        if dedup
-        else raw_scene_targets
+    floors, targets_by_floor, starts_by_floor = floor_groups(
+        records,
+        raw_scene_targets,
+        floor_threshold,
     )
+    selected_floor_id = choose_floor_id(
+        floors,
+        targets_by_floor,
+        starts_by_floor,
+        floor_selection,
+        dedup_mode,
+        position_precision,
+        spatial_merge_distance,
+        floor_threshold,
+    )
+    if selected_floor_id is None:
+        return [], None, None, floors
+    floor_targets = targets_by_floor[selected_floor_id]
+    scene_targets = deduplicate_targets(
+        floor_targets,
+        dedup_mode,
+        position_precision,
+        spatial_merge_distance,
+        floor_threshold,
+    )
+    floor_start_records = starts_by_floor.get(selected_floor_id, [])
+    default_start_task = floor_start_records[0] if floor_start_records else None
+    if default_start_task is not None and default_start_task.get("start_position") is not None:
+        start_y = float(default_start_task["start_position"][1])
+        scene_targets = [
+            target for target in scene_targets
+            if target.get("target_position") is not None
+            and abs(float(target["target_position"][1]) - start_y) <= floor_threshold
+        ]
     if len(scene_targets) < min_targets:
-        return []
+        return [], selected_floor_id, None, floors
     target_count = int(math.ceil(len(scene_targets) * coverage))
     target_count = min(max_targets, max(min_targets, target_count))
     selected = scene_targets[:target_count]
     for index, target in enumerate(selected):
         target["global_index"] = index
-    return selected
+    start_task = None
+    selected_source_task_ids = set()
+    for target in selected:
+        for occurrence in target.get("source_occurrences", []):
+            if occurrence.get("source_task_id"):
+                selected_source_task_ids.add(occurrence["source_task_id"])
+        if target.get("source_task_id"):
+            selected_source_task_ids.add(target["source_task_id"])
+    for record in floor_start_records:
+        if record.get("task_id") in selected_source_task_ids:
+            start_task = record
+            break
+    if start_task is None:
+        start_task = default_start_task
+    return selected, selected_floor_id, start_task, floors
 
 
 def build_scene_episode(
@@ -252,6 +467,9 @@ def build_scene_episode(
     scene,
     scene_records,
     selected_targets,
+    selected_floor_id,
+    selected_floor_heights,
+    start_task,
     scene_task_count,
     budget_ratios,
     coverage,
@@ -274,10 +492,23 @@ def build_scene_episode(
     seen_task_ids = set()
     task_lookup = {task["task_id"]: task for task in scene_records}
     for target in selected_targets:
-        task_id = target["source_task_id"]
-        if task_id not in seen_task_ids:
-            seen_task_ids.add(task_id)
-            source_tasks.append(task_lookup[task_id])
+        occurrence_task_ids = [
+            occurrence.get("source_task_id")
+            for occurrence in target.get("source_occurrences", [])
+            if occurrence.get("source_task_id")
+        ] or [target.get("source_task_id")]
+        for task_id in occurrence_task_ids:
+            if task_id in task_lookup and task_id not in seen_task_ids:
+                seen_task_ids.add(task_id)
+                source_tasks.append(task_lookup[task_id])
+    if start_task is not None and start_task["task_id"] not in seen_task_ids:
+        source_tasks.insert(0, start_task)
+        seen_task_ids.add(start_task["task_id"])
+    elif start_task is not None:
+        source_tasks = [start_task] + [
+            task for task in source_tasks
+            if task["task_id"] != start_task["task_id"]
+        ]
     start_position = source_tasks[0].get("start_position")
     floor_metadata = annotate_floor_metadata(
         start_position,
@@ -300,6 +531,7 @@ def build_scene_episode(
         "unordered_targets": True,
         "time_unit": "step",
         "num_source_tasks": len(source_tasks),
+        "source_splits": sorted({task.get("split") for task in source_tasks if task.get("split")}),
         "num_targets": len(selected_targets),
         "source_task_ids": [task["task_id"] for task in source_tasks],
         "instructions": [task.get("instruction") for task in source_tasks],
@@ -309,6 +541,8 @@ def build_scene_episode(
         ),
         "targets": selected_targets,
         **floor_metadata,
+        "selected_floor_id": selected_floor_id,
+        "selected_floor_heights": selected_floor_heights,
         "oracle_time_proxy_ordered_sum": oracle_time_proxy,
         "oracle_optimal_time": None,
         "oracle_optimal_order": None,
@@ -319,6 +553,7 @@ def build_scene_episode(
         "success_distance": success_distance,
         "target_value_type": "uniform",
         "benchmark_setting": benchmark_setting,
+        "dedup_mode": selected_targets[0].get("dedup_key", {}).get("mode", "semantic") if selected_targets else None,
         "coverage_target": coverage,
         "source_total_tasks_in_scene": scene_task_count,
         "source_total_targets_in_scene": sum(len(task.get("targets", [])) for task in scene_records),
@@ -362,8 +597,11 @@ def write_summary_csv(path, records, budget_ratios):
         "num_start_floor_targets",
         "num_off_start_floor_targets",
         "num_source_tasks",
+        "source_splits",
         "oracle_time_source",
         "oracle_time_proxy_ordered_sum",
+        "benchmark_setting",
+        "dedup_mode",
     ]
     fieldnames.extend(f"budget_{ratio}" for ratio in budget_ratios)
     with output.open("w", encoding="utf-8", newline="") as handle:
@@ -380,8 +618,11 @@ def write_summary_csv(path, records, budget_ratios):
                 "num_start_floor_targets": record["num_start_floor_targets"],
                 "num_off_start_floor_targets": len(record["targets_off_start_floor"]),
                 "num_source_tasks": record["num_source_tasks"],
+                "source_splits": ";".join(record.get("source_splits", [])),
                 "oracle_time_source": record["oracle_time_source"],
                 "oracle_time_proxy_ordered_sum": record["oracle_time_proxy_ordered_sum"],
+                "benchmark_setting": record.get("benchmark_setting"),
+                "dedup_mode": record.get("dedup_mode"),
             }
             for ratio in budget_ratios:
                 row[f"budget_{ratio}"] = record["time_budgets"][str(ratio)]
@@ -405,6 +646,12 @@ def main():
         help="Disable target-point deduplication inside each scene.",
     )
     parser.add_argument(
+        "--dedup-mode",
+        choices=["semantic", "spatial", "none"],
+        default="semantic",
+        help="How to merge repeated targets after floor filtering.",
+    )
+    parser.add_argument(
         "--include-missing-targets",
         action="store_true",
         help="Keep targets without target_position. By default they are filtered out.",
@@ -414,6 +661,18 @@ def main():
         type=float,
         default=0.25,
         help="Position grid size in meters for duplicate target matching.",
+    )
+    parser.add_argument(
+        "--spatial-merge-distance",
+        type=float,
+        default=0.5,
+        help="XZ distance in meters for merging nearby target points in spatial mode.",
+    )
+    parser.add_argument(
+        "--floor-selection",
+        choices=["start", "best_with_start", "best"],
+        default="best_with_start",
+        help="Which floor to keep before selecting targets.",
     )
     parser.add_argument(
         "--min-start-floor-targets",
@@ -436,6 +695,7 @@ def main():
         help="Metadata only. Later replace with enumerated_simulated_optimal.",
     )
     args = parser.parse_args()
+    dedup_mode = "none" if args.no_dedup else args.dedup_mode
 
     budget_ratios = [float(item) for item in args.budget_ratios.split(",") if item]
     records = [
@@ -458,20 +718,26 @@ def main():
                 target for target in raw_targets
                 if target.get("target_position") is not None
             ]
-        unique_targets = deduplicate_scene_targets(
+        unique_targets = deduplicate_targets(
             raw_targets,
+            dedup_mode,
             args.dedup_position_precision,
+            args.spatial_merge_distance,
+            args.floor_threshold,
         )
         raw_targets_by_scene[scene] = len(raw_targets)
         unique_targets_by_scene[scene] = len(unique_targets)
-        selected_targets = choose_scene_targets(
+        selected_targets, selected_floor_id, start_task, floor_heights = choose_scene_targets(
             scene_records,
             min_targets=args.min_targets,
             max_targets=args.max_targets,
             coverage=args.coverage,
-            dedup=not args.no_dedup,
+            dedup_mode=dedup_mode,
             position_precision=args.dedup_position_precision,
             include_missing_targets=args.include_missing_targets,
+            spatial_merge_distance=args.spatial_merge_distance,
+            floor_threshold=args.floor_threshold,
+            floor_selection=args.floor_selection,
         )
         if not selected_targets:
             skipped[scene] = len(scene_records)
@@ -490,6 +756,9 @@ def main():
                 scene,
                 scene_records,
                 selected_targets,
+                selected_floor_id,
+                floor_heights,
+                start_task,
                 len(scene_records),
                 budget_ratios,
                 args.coverage,
@@ -523,9 +792,9 @@ def main():
     )
     available_unique_targets = sum(unique_targets_by_scene.values())
     eligible_targets = sum(
-        unique_targets_by_scene[scene] if not args.no_dedup else raw_targets_by_scene[scene]
+        unique_targets_by_scene[scene]
         for scene in by_scene
-        if (unique_targets_by_scene[scene] if not args.no_dedup else raw_targets_by_scene[scene]) >= args.min_targets
+        if unique_targets_by_scene[scene] >= args.min_targets
     )
     covered_targets = sum(target_counts)
     source_scene_counts = [len(items) for items in by_scene.values()]
@@ -546,8 +815,10 @@ def main():
     print(f"include missing targets: {args.include_missing_targets}")
     dedup_source_targets = available_targets if args.include_missing_targets else available_positioned_targets
     print(f"duplicate target points removed: {dedup_source_targets - available_unique_targets}")
-    print(f"target deduplication: {'off' if args.no_dedup else 'on'}")
+    print(f"dedup mode: {dedup_mode}")
     print(f"dedup position precision: {args.dedup_position_precision} m")
+    print(f"spatial merge distance: {args.spatial_merge_distance} m")
+    print(f"floor selection: {args.floor_selection}")
     print(f"source targets per scene: {describe(source_target_counts)}")
     print(f"stitched episodes: {len(scene_episodes)}")
     print(f"skipped scenes (<{args.min_targets} targets): {len(skipped)}")

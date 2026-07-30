@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
-"""Run a NavGPT-style high-level target planner for time-aware LH-VLN tasks.
+"""Run budget-conditioned unordered long-horizon planning with an oracle follower.
 
-The first version keeps low-level navigation in Habitat-Sim and only swaps the
-target-selection layer. This makes it easy to compare a future LLM planner with
-nearest-target greedy and oracle target ordering.
+The LLM only chooses the next unordered target. Habitat-Sim's
+GreedyGeodesicFollower executes the low-level shortest-path actions. This
+separates time-aware high-level scheduling from visual recognition, local
+avoidance, and motor control.
 """
 
 import argparse
@@ -27,6 +28,8 @@ from tools.run_time_aware_greedy import (
     load_records,
     output_path_for_ratio,
     parse_budget_ratios,
+    record_id,
+    record_instruction,
     record_to_config,
     summarize,
     write_json,
@@ -38,6 +41,12 @@ FUZZY_TIME_PROMPTS = {
     "sufficient": "The time is sufficient. Try to complete the whole instruction.",
     "tight": "The time is tight. Prioritize useful progress.",
     "insufficient": "The time is relatively insufficient. Complete as many targets as possible.",
+}
+
+FUZZY_BY_RATIO = {
+    "0.5": "The time is very limited. You are in a hurry. Prioritize quick useful progress.",
+    "1.0": "The time is moderate. Balance completing targets with avoiding wasted exploration.",
+    "1.5": "The time is sufficient. Try to complete all targets carefully.",
 }
 
 
@@ -59,19 +68,28 @@ def make_sim(args, record, time_budget):
     )
 
 
-def format_targets(record, sim):
+def fuzzy_time_text(args):
+    if args.fuzzy_time != "auto":
+        return FUZZY_TIME_PROMPTS[args.fuzzy_time]
+    return FUZZY_BY_RATIO.get(
+        str(args.budget_ratio),
+        "The time is limited. Complete as many targets as possible.",
+    )
+
+
+def format_targets(args, record, sim):
     lines = []
     for target_index in sorted(sim.remaining_targets):
         target = record["targets"][target_index]
-        info = sim.get_target_info(target_index)
-        lines.append(
-            "- index={index}, name={name}, region={region}, estimated_distance={distance:.2f}".format(
-                index=target_index,
-                name=target["name"],
-                region=target.get("region_name") or target.get("region") or "unknown",
-                distance=info["geo dis"],
-            )
+        line = "- index={index}, name={name}, region={region}".format(
+            index=target_index,
+            name=target["name"],
+            region=target.get("region_name") or target.get("region") or "unknown",
         )
+        if args.planner_observation == "oracle_distance":
+            info = sim.get_target_info(target_index)
+            line += ", estimated_distance={distance:.2f}".format(distance=info["geo dis"])
+        lines.append(line)
     return "\n".join(lines)
 
 
@@ -88,26 +106,32 @@ def build_prompt(args, record, sim):
             f"The agent has used {sim.time_used} steps and has {sim.time_remaining} steps remaining."
         )
     elif args.time_prompt == "fuzzy":
-        time_text = FUZZY_TIME_PROMPTS[args.fuzzy_time]
+        time_text = fuzzy_time_text(args)
     else:
         time_text = "No time hint is provided."
 
-    return f"""You are a high-level planner for a time-aware VLN task.
+    distance_hint = ""
+    if args.planner_observation == "oracle_distance":
+        distance_hint = "The estimated_distance value is the shortest-path distance from the current position; smaller is usually better.\n"
+    else:
+        distance_hint = ""
+
+    return f"""You are a high-level target scheduler for a budget-conditioned unordered long-horizon navigation task.
 Choose the next target for the navigation system.
 The targets are unordered: you do not need to follow the order in the instruction.
-Your goal is to maximize the number of completed targets before the budget runs out.
-When time is limited, prefer a target that is likely reachable soon.
-The estimated_distance value is the shortest-path distance from the current position; smaller is usually better.
+Your goal is to maximize the number of completed targets before time runs out.
+When time is limited, choose a target that is likely to create useful progress soon.
+{distance_hint}
 
 {time_text}
 
 Instruction:
-{record["instruction"]}
+{record_instruction(record)}
 
 Completed targets: {completed_text}
 
 Remaining targets:
-{format_targets(record, sim)}
+{format_targets(args, record, sim)}
 
 Only output one target index from the remaining targets. Output the integer only.
 """
@@ -129,6 +153,11 @@ def choose_target(args, record, sim, prompt):
         nearest = sim.select_nearest_target()
         target_index = nearest["target_index"] if nearest else remaining[0]
         return target_index, str(target_index)
+    if args.planner == "oracle_order":
+        for target_index in record.get("oracle_optimal_order") or []:
+            if target_index in sim.remaining_targets:
+                return target_index, str(target_index)
+        return remaining[0], str(remaining[0])
 
     raise ValueError(f"Unsupported planner: {args.planner}")
 
@@ -195,7 +224,7 @@ def parse_budget(record, ratio):
     ratio_key = str(ratio)
     time_budget = record["time_budgets"].get(ratio_key)
     if time_budget is None:
-        raise ValueError(f"Missing budget ratio {ratio_key} for {record['task_id']}")
+        raise ValueError(f"Missing budget ratio {ratio_key} for {record_id(record)}")
     return time_budget
 
 
@@ -269,7 +298,7 @@ def run_episode(args, record):
     result["time_prompt"] = args.time_prompt
     result["fuzzy_time"] = args.fuzzy_time if args.time_prompt == "fuzzy" else None
     result["planner_trace"] = planner_trace
-    result["task_id"] = record["task_id"]
+    result["task_id"] = record_id(record)
     result["split"] = record["split"]
     result["scene"] = record["scene"]
     result["robot"] = record["robot"]
@@ -286,18 +315,31 @@ def write_summary_csv_with_planner(path, rows, args):
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--episodes", default="data/time_aware/episodes.jsonl")
-    parser.add_argument("--split", default="val", choices=["train", "val", "test"])
-    parser.add_argument("--limit", type=int, default=5)
+    parser.add_argument(
+        "--episodes",
+        default="/file_system/nas/algorithm/Intern03/data/time_aware_scene/all_episodes_spatial_start_floor_oracle_time.jsonl",
+    )
+    parser.add_argument("--split", default="all", choices=["train", "val", "test", "all"])
+    parser.add_argument("--limit", type=int, default=0)
     parser.add_argument("--budget-ratio", type=float, default=None)
     parser.add_argument(
         "--budget-ratios",
-        default="0.5,0.75,1.0,1.25",
+        default="0.5,1.0,1.5",
         help="Comma-separated budget ratios. Ignored when --budget-ratio is set.",
     )
-    parser.add_argument("--planner", default="nearest", choices=["nearest", "first", "random", "llm"])
-    parser.add_argument("--time-prompt", default="explicit", choices=["explicit", "fuzzy", "none"])
-    parser.add_argument("--fuzzy-time", default="tight", choices=sorted(FUZZY_TIME_PROMPTS))
+    parser.add_argument(
+        "--planner",
+        default="nearest",
+        choices=["nearest", "first", "random", "oracle_order", "llm"],
+    )
+    parser.add_argument("--time-prompt", default="fuzzy", choices=["explicit", "fuzzy", "none"])
+    parser.add_argument("--fuzzy-time", default="auto", choices=["auto"] + sorted(FUZZY_TIME_PROMPTS))
+    parser.add_argument(
+        "--planner-observation",
+        default="text_only",
+        choices=["text_only", "oracle_distance"],
+        help="What target information the LLM sees. text_only hides oracle distances.",
+    )
     parser.add_argument(
         "--llm-command",
         default=None,
@@ -321,7 +363,7 @@ def main():
     parser.add_argument("--no-render", action="store_true", default=True)
     parser.add_argument("--render", dest="no_render", action="store_false")
     parser.add_argument("--output", default=None)
-    parser.add_argument("--output-dir", default="output/time_aware")
+    parser.add_argument("--output-dir", default="output/time_aware_scene/llm_oracle_follower")
     parser.add_argument("--summary-csv", default=None)
     parser.add_argument("--quiet", action="store_true")
     args = parser.parse_args()
@@ -341,7 +383,7 @@ def main():
             f"budget_ratio={ratio} split={args.split} episodes={len(records)} ====="
         )
         for index, record in enumerate(records):
-            print(f"===== [{index + 1}/{len(records)}] {record['task_id']} =====")
+            print(f"===== [{index + 1}/{len(records)}] {record_id(record)} =====")
             if args.quiet:
                 with contextlib.redirect_stdout(io.StringIO()):
                     results.append(run_episode(args, record))
@@ -354,6 +396,7 @@ def main():
         summary["limit"] = args.limit
         summary["planner"] = args.planner
         summary["time_prompt"] = args.time_prompt
+        summary["planner_observation"] = args.planner_observation
         if args.time_prompt == "fuzzy":
             summary["fuzzy_time"] = args.fuzzy_time
         print("\nsummary:")

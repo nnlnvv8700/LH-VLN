@@ -14,10 +14,10 @@ import sys
 import requests
 
 
-DEFAULT_SYSTEM_PROMPT = """You are a deterministic target selector for a time-aware unordered multi-target VLN benchmark.
-The user prompt lists remaining navigation targets with integer indices and estimated distances.
-The targets are unordered. Do not blindly follow the instruction order.
-Choose the target that maximizes useful progress under the time budget, usually a reachable nearby target when time is tight.
+DEFAULT_SYSTEM_PROMPT = """You are a deterministic high-level target scheduler for a time-aware unordered multi-target navigation benchmark.
+The user prompt lists remaining navigation targets with integer indices and a fuzzy time-pressure description.
+The targets are unordered. Do not blindly follow the original instruction order.
+Choose the next target that is most useful under the current time pressure. When time is tight, prioritize quick useful progress; when time is sufficient, prefer completing the overall task.
 Return exactly one remaining target index and nothing else.
 Do not explain your choice."""
 

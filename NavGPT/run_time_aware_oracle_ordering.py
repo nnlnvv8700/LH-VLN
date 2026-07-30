@@ -20,6 +20,7 @@ from tools.run_time_aware_greedy import (
     load_records,
     output_path_for_ratio,
     parse_budget_ratios,
+    record_id,
     record_to_config,
     summarize,
     write_json,
@@ -87,7 +88,7 @@ def run_episode(args, record):
     ratio_key = str(args.budget_ratio)
     time_budget = record["time_budgets"].get(ratio_key)
     if time_budget is None:
-        raise ValueError(f"Missing budget ratio {ratio_key} for {record['task_id']}")
+        raise ValueError(f"Missing budget ratio {ratio_key} for {record_id(record)}")
 
     target_indices = list(range(len(record["targets"])))
     candidates = []
@@ -96,7 +97,7 @@ def run_episode(args, record):
 
     best = max(candidates, key=result_key)
     best["candidate_orders"] = len(candidates)
-    best["task_id"] = record["task_id"]
+    best["task_id"] = record_id(record)
     best["split"] = record["split"]
     best["scene"] = record["scene"]
     best["robot"] = record["robot"]
@@ -112,7 +113,7 @@ def write_summary_csv_with_baseline(path, rows):
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--episodes", default="data/time_aware/episodes.jsonl")
-    parser.add_argument("--split", default="val", choices=["train", "val", "test"])
+    parser.add_argument("--split", default="val", choices=["train", "val", "test", "all"])
     parser.add_argument("--limit", type=int, default=5)
     parser.add_argument("--budget-ratio", type=float, default=None)
     parser.add_argument(
@@ -145,7 +146,7 @@ def main():
         results = []
         print(f"\n===== oracle_ordering budget_ratio={ratio} split={args.split} episodes={len(records)} =====")
         for index, record in enumerate(records):
-            print(f"===== [{index + 1}/{len(records)}] {record['task_id']} =====")
+            print(f"===== [{index + 1}/{len(records)}] {record_id(record)} =====")
             if args.quiet:
                 with contextlib.redirect_stdout(io.StringIO()):
                     results.append(run_episode(args, record))
