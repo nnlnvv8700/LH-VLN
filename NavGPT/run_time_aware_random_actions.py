@@ -1,3 +1,4 @@
+# 用途：NavGPT-style Time-Aware VLN 脚本。
 #!/usr/bin/env python3
 """Run a primitive random-action baseline for scene-level Time-Aware VLN.
 

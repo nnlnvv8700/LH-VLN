@@ -1,3 +1,4 @@
+# 用途：LH-VLN 监督微调入口。
 from utils.agent import HabitatAgent, save_checkpoint
 from utils.SFT_agent import SFTAgent
 from utils.metrics import NavigationMetrics

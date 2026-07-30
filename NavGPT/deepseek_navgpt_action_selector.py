@@ -1,3 +1,4 @@
+# 用途：NavGPT-style Time-Aware VLN 脚本。
 #!/usr/bin/env python3
 """DeepSeek action selector for the NavGPT-Habitat adapter.
 

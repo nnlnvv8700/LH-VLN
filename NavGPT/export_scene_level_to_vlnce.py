@@ -1,3 +1,4 @@
+# 用途：NavGPT-style Time-Aware VLN 脚本。
 #!/usr/bin/env python3
 """Export scene-level Time-Aware VLN episodes to a VLN-CE/NaVid-style file.
 

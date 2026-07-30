@@ -1,3 +1,4 @@
+# 用途：LH-VLN 任务、轨迹或子任务生成脚本。
 import argparse
 import os
 from task_gen import gen_task

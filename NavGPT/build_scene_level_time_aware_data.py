@@ -1,3 +1,4 @@
+# 用途：NavGPT-style Time-Aware VLN 脚本。
 #!/usr/bin/env python3
 """Build scene-level time-aware tasks by stitching LH-VLN target points.
 

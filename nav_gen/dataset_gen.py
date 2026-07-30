@@ -1,3 +1,4 @@
+# 用途：LH-VLN 任务、轨迹或子任务生成脚本。
 import numpy as np
 import json
 import math

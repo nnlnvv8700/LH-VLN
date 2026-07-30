@@ -1,3 +1,4 @@
+# 用途：NavGPT-style Time-Aware VLN 脚本。
 #!/usr/bin/env python3
 """Run budget-conditioned unordered long-horizon planning with an oracle follower.
 

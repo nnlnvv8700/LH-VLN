@@ -1,3 +1,4 @@
+# 用途：NavGPT-style Time-Aware VLN 脚本。
 #!/usr/bin/env python3
 """Run NaVid/Uni-NaVid inside the Time-Aware VLN multi-target evaluator.
 

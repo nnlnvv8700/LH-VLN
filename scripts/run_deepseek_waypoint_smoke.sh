@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# 用途：运行 Time-Aware VLN 历史实验。
 set -euo pipefail
 
 cd /file_system/vepfs/algorithm/intern03/mhw/LH-VLN
